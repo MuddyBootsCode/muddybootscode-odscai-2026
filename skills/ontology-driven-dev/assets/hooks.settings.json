@@ -1,0 +1,35 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 .claude/skills/ontology-driven-dev/scripts/ontology_query.py summary 2>/dev/null || true"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 .claude/skills/ontology-driven-dev/scripts/ontology_check.py --touched"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 .claude/skills/ontology-driven-dev/scripts/ontology_check.py --changed --stop"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,40 @@
+# Ontology-driven development for Claude Code
+
+One plugin, two parts:
+
+- **The `ontology-driven-dev` skill** (`skills/ontology-driven-dev/`). It gives a repo a written ontology in `ontology/<domain>.md`: entities, relationships, invariants with the gate that enforces each, vocabulary, intent and scope. Its scripts query the ontology, validate it, and run as hooks that stop a change to governed code when the ontology was not updated with it.
+- **The `ontology-observer` mod** (`hooks/`). A pane beside the chat that shows what those checks saw: each rule by group, the files the last edit touched, and an issue card for each open problem, with Fix it, Explore issue and Leave it.
+
+## Install
+
+At the prompt of a terminal session:
+
+```
+/plugin install ontology-observer --marketplace MuddyBootsCode/muddybootscode-odscai-2026
+```
+
+Answer `y` to add the marketplace, then pick a scope.
+
+From a shell:
+
+```
+claude plugin install ontology-observer --marketplace MuddyBootsCode/muddybootscode-odscai-2026
+```
+
+In the desktop app, where `/plugin` does not run: click + next to the prompt box, then Plugins, Add marketplace with `MuddyBootsCode/muddybootscode-odscai-2026`, then Add plugin.
+
+## Use
+
+1. In your repo, ask Claude to set up the ontology. The skill reads the schema, interviews you for intent, vocabulary and scope, writes `ontology/<domain>.md`, and installs the hooks with `scripts/install.sh`.
+2. Open the pane with `/ontology`.
+
+The pane reads `.claude/ontology-state.jsonl`, which the checker scripts write on every check. Without that file the pane is empty.
+
+## What raises an issue card
+
+- A change to a type the ontology maps to an entity.
+- A change to the file that enforces a rule (its gate).
+- A problem in the ontology file: malformed, or a rule with no gate.
+- A rule's test that failed or did not run after the change.
+
+The per-edit check runs on Claude's own edits. An edit saved in your editor is seen by the end-of-turn and commit checks.

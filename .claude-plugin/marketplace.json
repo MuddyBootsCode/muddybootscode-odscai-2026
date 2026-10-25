@@ -1,0 +1,5 @@
+{
+  "name": "muddybootscode-odscai-2026",
+  "owner": { "name": "MuddyBootsCode" },
+  "plugins": [{ "name": "ontology-observer", "source": "./" }]
+}

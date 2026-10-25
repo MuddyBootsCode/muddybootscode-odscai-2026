@@ -1,0 +1,6 @@
+{
+  "name": "ontology-observer",
+  "version": "0.1.0",
+  "description": "A pane showing the ontology gate checks of this repo: each lifecycle stage, the files touched this turn with their tier and signal, and a status line.",
+  "types": "./types/index.d.ts"
+}
