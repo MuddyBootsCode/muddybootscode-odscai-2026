@@ -132,13 +132,70 @@ def is_ontology_file(rel: str) -> bool:
     return rel.startswith("ontology/") and rel.endswith(".md")
 
 
+TS_EXT = (".ts", ".tsx", ".mts", ".cts")
+
+
+def typescript_dir(root: Path) -> str | None:
+    """The `typescript` package the function mapper loads: ONTOLOGY_TYPESCRIPT_DIR, else the
+    repo's own node_modules (top level or one package down). None when there is none."""
+    if os.environ.get("ONTOLOGY_TYPESCRIPT_DIR"):
+        return os.environ["ONTOLOGY_TYPESCRIPT_DIR"]
+    for nm in [root / "node_modules", *sorted(root.glob("*/node_modules"))]:
+        if (nm / "typescript").is_dir():
+            return str(nm / "typescript")
+    return None
+
+
+def function_mapper(root: Path):
+    """mapper(rel, text, ranges) -> names of the functions around those lines of `text`, or
+    None when that cannot be told: not TypeScript, no node or typescript, or the mapper
+    failed. The text is mapped from a temporary copy, since a staged, committed or old
+    version need not be on disk. Without a mapper every rule naming a gate file still fires."""
+    script = Path(__file__).resolve().parent / "changed_functions.mjs"
+    ts = typescript_dir(root)
+
+    def mapper(rel: str, text: str, ranges: list[list[int]]) -> set[str] | None:
+        if not ranges or not rel.endswith(TS_EXT) or ts is None or not script.is_file():
+            return None
+        import subprocess
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            copy = Path(tmp) / Path(rel).name
+            copy.write_text(text, encoding="utf-8")
+            payload = {"files": [{"path": str(copy), "lines": ranges}], "typescript": ts}
+            try:
+                r = subprocess.run(["node", str(script)], input=json.dumps(payload), capture_output=True, text=True, cwd=root)
+                names = json.loads(r.stdout or "{}") if r.returncode == 0 else None
+            except (OSError, json.JSONDecodeError):
+                names = None
+        if names is None:
+            eprint(f"ontology: could not map {rel} to functions; every rule naming it is flagged")
+            return None
+        found = next(iter(names.values()), None)
+        return set(found) if found else None
+    return mapper
+
+
 def classify(root: Path, rel: str, onts, old_rev: str | None, new_rev: str | None) -> dict:
     """One governed file: {path, tier, signals, domains}. new_rev None = working tree."""
     old = git_text(root, old_rev, rel) if old_rev is not None else None
     new = git_text(root, new_rev, rel) if new_rev is not None else worktree_text(root, rel)
-    signals = file_signals(rel, old, new, onts)
+    signals = file_signals(rel, old, new, onts, function_mapper(root))
     doms = sorted({o["domain"] for o, _ in path_governed_by(rel, onts)})
     return {"path": rel, "tier": tier_of(signals), "signals": signals, "domains": doms}
+
+
+def gate_place(sig: dict) -> str:
+    """ " (fit.ts › alpha, line 2)": where in the gate file the change is, when known."""
+    fns = [f for f in sig.get("functions", []) if f != "<module>"]
+    lines = sig.get("lines") or []
+    where = [sig["name"] + (f" › {', '.join(fns)}" if fns else "")]
+    if lines:
+        first, last = lines[0][0], lines[-1][1]
+        where.append(f"line {first}" if first == last else f"lines {first}–{last}")
+    if sig.get("match") == "same-file" and sig.get("gate_functions"):
+        where[-1] += f"; its gate is {', '.join(sig['gate_functions'])}"
+    return f" ({', '.join(where)})" if fns or lines else ""
 
 
 def describe(sig: dict) -> str:
@@ -148,7 +205,7 @@ def describe(sig: dict) -> str:
     if k == "parity":
         return f"parity: changed without its partner `{sig['partner']}`"
     if k == "gate-file":
-        return f"gate file for invariant: {sig['invariant']}"
+        return f"gate file for invariant: {sig['invariant']}{gate_place(sig)}"
     if k == "deleted":
         return "deleted"
     return k

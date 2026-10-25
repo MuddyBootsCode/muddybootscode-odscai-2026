@@ -6,6 +6,12 @@ export type Signal = {
   diff?: string
   partner?: string
   invariant?: string
+  /** gate-file: the rule's gate text, why it fired, the functions around the change, its line ranges. */
+  gate?: string
+  match?: 'function' | 'file' | 'module' | 'unmapped' | 'same-file' | string
+  gate_functions?: string[]
+  functions?: string[]
+  lines?: number[][]
 }
 
 export type StateFile = {

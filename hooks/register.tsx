@@ -359,6 +359,10 @@ type Issue = {
   note?: string
   /** A failing test's output, shown as the evidence under the title. */
   output?: string
+  /** A gate card: the full path of the changed file, the changed lines, and why the rule was flagged. */
+  path?: string
+  diff?: string
+  why?: string
   rules: Rule[]
   fix: string
   explore: string
@@ -424,6 +428,25 @@ function resolvedAt(list: StateRecord[]): string | undefined {
 // An edit to the file that enforces a rule (its gate) puts that rule at risk even when no entity's
 // type changed: the card names the rule and offers the two honest answers, update it or mark the
 // change rule-neutral.
+// Where in a gate file a change is: "fit.ts › alpha, line 75" (function and lines when known).
+function gatePlace(file: string, s: Signal): string {
+  const fns = (s.functions ?? []).filter(f => f !== '<module>')
+  const lines = s.lines ?? []
+  let place = base(file) + (fns.length ? ` › ${fns.join(', ')}` : '')
+  const first = lines[0]?.[0]
+  const last = lines[lines.length - 1]?.[1]
+  if (first !== undefined && last !== undefined) place += first === last ? `, line ${first}` : `, lines ${first}–${last}`
+  return place
+}
+
+const WHY: Record<string, (fns: string, gate: string) => string> = {
+  function: fns => `${fns} changed, and this rule's gate names it.`,
+  'same-file': (fns, gate) => `${fns} changed, not ${gate}, which this rule's gate names. Check whether ${gate} calls it.`,
+  module: () => 'The change is outside any function, so every rule this file enforces is at risk.',
+  file: () => "This rule's gate names the whole file, so any change to it counts.",
+  unmapped: () => 'The change could not be traced to a function, so every rule this file enforces is flagged.',
+}
+
 function gateIssues(files: StateFile[], doms: Domain[], blocked: boolean): Issue[] {
   return files.flatMap(f =>
     f.signals.filter(s => s.kind === 'gate-file' && s.invariant).map(s => {
@@ -431,18 +454,23 @@ function gateIssues(files: StateFile[], doms: Domain[], blocked: boolean): Issue
       const domain = f.domains[0]
       const where = domain ? `ontology/${domain}.md` : 'the ontology'
       const stored = doms.flatMap(d => d.invariants.map(i => ({ ...i, file: d.file }))).find(i => plain(i.text) === text)
-      const rule: Rule = stored ?? { text, gate: base(f.path), file: domain ? `${domain}.md` : '' }
+      const rule: Rule = stored ?? { text, gate: s.gate ?? base(f.path), file: domain ? `${domain}.md` : '' }
       const named = doms.flatMap(d => Object.keys(d.entities).filter(e => mentions(text, e)))
+      const place = gatePlace(f.path, s)
+      const fullPlace = f.path + place.slice(base(f.path).length)
+      const fns = (s.functions ?? []).filter(fn => fn !== '<module>').join(', ')
+      const why = s.match ? WHY[s.match]?.(fns, (s.gate_functions ?? []).join(', ')) : undefined
       const title = blocked
-        ? `${base(f.path)} enforces the rule "${text}", and ${where} was not updated.`
-        : `${base(f.path)} enforces the rule "${text}"; check the rule still holds.`
-      const fix = `${f.path} enforces the rule "${text}" (${where}) and it changed. If the change alters what the rule allows, update the rule in ${where} with a Changelog line. If it does not (a log line, a rename, a refactor), say so and commit with ontology-skip: <reason> in the message. Run the rule's test${rule.gate ? ` (${rule.gate})` : ''} and confirm it passes.`
+        ? `${place} changed. It enforces the rule "${text}", and ${where} was not updated.`
+        : `${place} changed. It enforces the rule "${text}"; check the rule still holds.`
+      const change = s.diff ? ` The change:\n${changedLines(s.diff).join('\n')}\n` : ''
+      const fix = `${fullPlace} changed, and it enforces the rule "${text}" (${where}).${change} If the change alters what the rule allows, update the rule in ${where} with a Changelog line. If it does not (a log line, a rename, a refactor), say so and commit with ontology-skip: <reason> in the message. Run the rule's test${rule.gate ? ` (${rule.gate})` : ''} and confirm it passes.`
       const explore = explorePrompt(
-        `${f.path} changed, and it is the gate for the rule "${text}" (${where}).`,
+        `${fullPlace} changed, and it is the gate for the rule "${text}" (${where}).${change}`,
         [rule],
         named.flatMap(e => disagreementsFor(doms, e))
       )
-      return { id: `gate:${hash(f.path + text)}`, level: blocked ? 'error' : 'warning', title, rules: [rule], fix, explore } as Issue
+      return { id: `gate:${hash(f.path + text)}`, level: blocked ? 'error' : 'warning', title, rules: [rule], fix, explore, path: f.path, diff: s.diff, why } as Issue
     })
   )
 }
@@ -814,9 +842,15 @@ export const register: Register = on => {
                 <Box marginTop={1}>{cardBody(card, true)}</Box>
               ) : (
                 <Box flexDirection="column">
+                  {issue.path && <Text dimColor wrap="wrap">in {issue.path}</Text>}
+                  {issue.diff && changedLines(issue.diff).map(l => (
+                    <Text color={l.startsWith('+') ? 'green' : 'red'} mono wrap="wrap">{'  '}{l}</Text>
+                  ))}
+                  {issue.why && <Text dimColor wrap="wrap">{issue.why}</Text>}
                   {issue.note && <Text color="yellow" wrap="wrap">{issue.note}</Text>}
                   {issue.output && <Text color="red" wrap="wrap">{issue.output}</Text>}
-                  {issue.rules.length > 0 && !issue.id.startsWith('rule:') && <Text dimColor>rules at risk: they name what changed</Text>}
+                  {issue.rules.length > 0 && issue.id.startsWith('gate:') && <Text dimColor>the rule this code enforces</Text>}
+                  {issue.rules.length > 0 && !issue.id.startsWith('rule:') && !issue.id.startsWith('gate:') && <Text dimColor>rules at risk: they name what changed</Text>}
                   {issue.rules.map(r => ruleBlock(r, true, false))}
                 </Box>
               )}

@@ -440,7 +440,9 @@ test('an edit to a rule\'s gate file is an issue box naming the rule, with fix, 
   const lines = [
     { ts: '2026-10-25T07:48:24-0500', mode: 'touched', exit: 2, tier: 'affecting',
       files: [{ path: 'src/fit.ts', tier: 'affecting',
-        signals: [{ kind: 'gate-file', name: 'fit.ts', invariant: 'An Order is larger than any Item in it.' }], domains: ['demo'] }],
+        signals: [{ kind: 'gate-file', name: 'fit.ts', invariant: 'An Order is larger than any Item in it.', gate: '`fit.ts:findItemsLargerThanOrder`',
+          match: 'function', functions: ['findItemsLargerThanOrder'], lines: [[75, 75]],
+          diff: "@@ -74,2 +74,3 @@\n export function findItemsLargerThanOrder() {\n+  console.log('fit check');\n   const orders = [];" }], domains: ['demo'] }],
       domains: ['demo'], message: 'ontology: src/fit.ts changes what ontology/demo.md describes' },
   ]
   engine(on, status, { text: lines.map(l => JSON.stringify(l)).join('\n') + '\n' }, ONTOLOGY, submitted)
@@ -448,9 +450,16 @@ test('an edit to a rule\'s gate file is an issue box naming the rule, with fix, 
   await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
 
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
-  const title = await ui.find({ type: 'Text', text: /fit\.ts enforces the rule/ })
-  expect(title?.text).toMatch(/An Order is larger than any Item in it\./)
+  // where: file, function and line in the title, the full path under it
+  const title = await ui.find({ type: 'Text', text: /fit\.ts › findItemsLargerThanOrder, line 75 changed/ })
+  expect(title?.text).toMatch(/enforces the rule "An Order is larger than any Item in it\."/)
   expect(title?.text).toMatch(/ontology\/demo\.md was not updated/)
+  expect(await ui.find({ type: 'Text', text: /^in src\/fit\.ts$/ })).toBeDefined()
+  // what: the changed line, and why this rule was flagged
+  expect(await ui.find({ type: 'Text', text: /\+  console\.log\('fit check'\);/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /findItemsLargerThanOrder changed, and this rule's gate names it/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^the rule this code enforces$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /rules at risk/ })).toBeUndefined()
   expect(await ui.find({ type: 'Text', text: /^ERROR$/ })).toBeDefined()
   expect(await ui.find({ type: 'Button', text: /Explore issue/ })).toBeDefined()
   expect(await ui.find({ type: 'Button', text: /Leave it/ })).toBeDefined()
@@ -458,7 +467,8 @@ test('an edit to a rule\'s gate file is an issue box naming the rule, with fix, 
   const fix = await ui.find({ type: 'Button', text: /Fix it/ })
   await $.ui.press({ plugin: 'ontology-observer', key: fix!.key!, requestId: 'ontology', surface: 'desktop' })
   const fixText = submitted.at(-1) ?? ''
-  expect(fixText).toMatch(/src\/fit\.ts/)
+  expect(fixText).toMatch(/src\/fit\.ts › findItemsLargerThanOrder, line 75/)
+  expect(fixText).toMatch(/console\.log\('fit check'\)/)
   expect(fixText).toMatch(/An Order is larger than any Item in it\./)
   expect(fixText).toMatch(/ontology\/demo\.md/)
   expect(fixText).toMatch(/ontology-skip:/)
@@ -469,5 +479,23 @@ test('an edit to a rule\'s gate file is an issue box naming the rule, with fix, 
   const explore = submitted.at(-1) ?? ''
   expect(explore).toMatch(/larger than any Item.*itemPlacement\.test\.ts/)
   expect(explore).toMatch(/Order-to-item margin/)
+  await ui.unmount()
+})
+
+test('a rule gated by another function of the changed file says which function changed and which one its gate is', async ($, on) => {
+  const status: string[] = []
+  const lines = [
+    { ts: '2026-10-25T09:00:00-0500', mode: 'touched', exit: 2, tier: 'affecting',
+      files: [{ path: 'src/fit.ts', tier: 'affecting',
+        signals: [{ kind: 'gate-file', name: 'fit.ts', invariant: 'Every Item has a price.', gate: '`fit.ts:priceOf`',
+          match: 'same-file', gate_functions: ['priceOf'], functions: ['findItemsLargerThanOrder'], lines: [[75, 75]],
+          diff: "@@ -74,2 +74,3 @@\n+  console.log('fit check');" }], domains: ['demo'] }],
+      domains: ['demo'], message: '' },
+  ]
+  engine(on, status, { text: lines.map(l => JSON.stringify(l)).join('\n') + '\n' }, ONTOLOGY)
+  await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect(await ui.find({ type: 'Text', text: /fit\.ts › findItemsLargerThanOrder, line 75 changed/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /findItemsLargerThanOrder changed, not priceOf, which this rule's gate names\. Check whether priceOf calls it\./ })).toBeDefined()
   await ui.unmount()
 })

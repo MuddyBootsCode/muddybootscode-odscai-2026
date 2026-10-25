@@ -161,17 +161,120 @@ def worktree_text(root: Path, rel: str) -> str | None:
 
 # ---------- per-file classification ----------
 
-def gate_file_signals(rel: str, onts: list[dict]) -> list[dict]:
-    base = Path(rel).name
-    out = []
-    for o in onts:
-        for inv in o["invariants"]:
-            if inv["gate"] and base in inv["gate"]:
-                out.append({"kind": "gate-file", "name": base, "invariant": inv["text"][:80]})
+def changed_line_ranges(old: str | None, new: str | None) -> list[list[int]]:
+    """1-based [first, last] line ranges of the new text that changed. A pure deletion is
+    reported at the line it happened before, so it still has a place in the new file."""
+    a, b = (old or "").splitlines(), (new or "").splitlines()
+    out: list[list[int]] = []
+    for tag, _i1, _i2, j1, j2 in difflib.SequenceMatcher(a=a, b=b, autojunk=False).get_opcodes():
+        if tag == "equal":
+            continue
+        first = j1 + 1
+        out.append([first, max(first, j2)])
     return out
 
 
-def file_signals(rel: str, old: str | None, new: str | None, onts: list[dict]) -> list[dict]:
+def removed_line_ranges(old: str | None, new: str | None) -> list[list[int]]:
+    """1-based [first, last] ranges of the old text that were removed or replaced: where a
+    deleted or renamed function was, which the new text can no longer show."""
+    a, b = (old or "").splitlines(), (new or "").splitlines()
+    return [[i1 + 1, i2] for tag, i1, i2, _j1, _j2 in difflib.SequenceMatcher(a=a, b=b, autojunk=False).get_opcodes()
+            if tag in ("replace", "delete") and i2 > i1]
+
+
+def change_diff(rel: str, old: str | None, new: str | None, limit: int = 40) -> str:
+    """The change as a unified diff with one line of context, cut at `limit` lines."""
+    lines = list(difflib.unified_diff((old or "").splitlines(), (new or "").splitlines(),
+                                      fromfile=rel, tofile=rel, n=1, lineterm=""))[2:]
+    if len(lines) > limit:
+        lines = lines[:limit] + [f"... {len(lines) - limit} more lines"]
+    return "\n".join(lines)
+
+
+def gate_functions(gate: str, base: str) -> set[str] | None:
+    """The functions a gate names in this file, or None when it names the bare file (or is a
+    file the gate only mentions in passing): then any change to the file is a change to it."""
+    names: set[str] = set()
+    for m in re.finditer(re.escape(base) + r"(?::([A-Za-z_$][\w$.]*))?", gate):
+        if not m.group(1):
+            return None
+        names.add(m.group(1))
+    return names
+
+
+def gate_file_signals(rel: str, old: str | None, new: str | None, onts: list[dict],
+                      mapper=None) -> list[dict]:
+    """One signal per rule whose gate names this file and whose enforcing code the change
+    reached. `mapper(rel, text, ranges)` returns the names of the functions around those
+    lines of `text` ("<module>" for code outside any function), or None when it cannot tell.
+    The changed lines are mapped in the new text and the removed ones in the old, so a
+    deleted or renamed function is named too.
+
+    Every rule naming the file fires: a direct hit when the change is in a function its
+    gate names (`match` "function"), the whole file or outside any function ("file",
+    "module"), untraceable ("unmapped"), or another function of the file ("same-file"),
+    since its gate may call the changed one. The direct hits come first."""
+    base = Path(rel).name
+    rules = [inv for o in onts for inv in o["invariants"] if inv["gate"] and base in inv["gate"]]
+    if not rules:
+        return []
+    ranges = changed_line_ranges(old, new)
+    changed = changed_names(rel, old, new, ranges, mapper)
+    diff = change_diff(rel, old, new)
+    out = []
+    for inv in rules:
+        named = gate_functions(inv["gate"], base)
+        if changed is None:
+            match = "unmapped"
+        elif named is None:
+            match = "file"
+        elif "<module>" in changed:
+            match = "module"
+        elif named & changed:
+            match = "function"
+        else:
+            match = "same-file"
+        out.append({"kind": "gate-file", "name": base, "invariant": inv["text"], "gate": inv["gate"],
+                    "match": match, "gate_functions": sorted(named or []), "functions": sorted(changed or []),
+                    "lines": ranges, "diff": diff})
+    return sorted(out, key=lambda s: s["match"] == "same-file")
+
+
+def non_blank(text: str | None, ranges: list[list[int]]) -> list[list[int]]:
+    """The ranges with blank lines dropped: a blank line between two functions belongs to
+    neither, and would otherwise make an edit look like a change outside any function."""
+    lines = (text or "").splitlines()
+    out: list[list[int]] = []
+    for first, last in ranges:
+        for n in range(first, last + 1):
+            if 0 < n <= len(lines) and lines[n - 1].strip():
+                if out and out[-1][1] == n - 1:
+                    out[-1][1] = n
+                else:
+                    out.append([n, n])
+    return out
+
+
+def changed_names(rel: str, old: str | None, new: str | None, ranges: list[list[int]], mapper) -> set[str] | None:
+    """The functions the change reached, from the new text's changed lines and the old text's
+    removed ones. None when the mapper is missing or cannot tell for either side."""
+    if not mapper:
+        return None
+    removed = removed_line_ranges(old, new)
+    sides = [(new, ranges), (old, removed)]
+    names: set[str] = set()
+    for text, side in sides:
+        side = non_blank(text, side)
+        if not side or text is None:
+            continue
+        found = mapper(rel, text, side)
+        if found is None:
+            return None
+        names |= found
+    return names or None
+
+
+def file_signals(rel: str, old: str | None, new: str | None, onts: list[dict], mapper=None) -> list[dict]:
     """Signals for one governed file given its old and new text."""
     if old is not None and new is None:
         return [{"kind": "deleted", "name": rel}]
@@ -182,7 +285,7 @@ def file_signals(rel: str, old: str | None, new: str | None, onts: list[dict]) -
         for o in onts:
             named.update(o.get("declarations", {}))
         signals += declaration_signals(old, new, lang, named)
-    signals += gate_file_signals(rel, onts)
+    signals += gate_file_signals(rel, old, new, onts, mapper)
     return signals
 
 
