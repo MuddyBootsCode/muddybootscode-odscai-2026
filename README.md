@@ -1,4 +1,9 @@
-# Ontology-driven development for Claude Code
+# Ontology-driven development for Claude Code and Codex
+
+Choose your agent: [Claude Code](#claude-code-install) or
+[Codex](codex/README.md). Both use the same ontology checker. Claude includes
+the observer pane; Codex returns findings in the conversation through native
+lifecycle hooks.
 
 ## ODSC AI West 2026 workshop
 
@@ -20,7 +25,7 @@ One plugin, two parts:
 - **The `ontology-driven-dev` skill** (`skills/ontology-driven-dev/`). It gives a repo a written ontology in `ontology/<domain>.md`: entities, relationships, invariants with the gate that enforces each, vocabulary, intent and scope. Its scripts query the ontology, validate it, and run as hooks that stop a change to governed code when the ontology was not updated with it.
 - **The `ontology-observer` mod** (`hooks/`). A pane beside the chat that shows what those checks saw: each rule by group, the files the last edit touched, and an issue card for each open problem, with Fix it, Explore issue and Leave it.
 
-## Install
+## Claude Code install
 
 At the prompt of a terminal session:
 

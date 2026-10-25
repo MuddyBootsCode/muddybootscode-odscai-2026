@@ -1,0 +1,23 @@
+{
+  "description": "Read domain context and report governed changes using the shared ontology checker.",
+  "hooks": {
+    "SessionStart": [{ "hooks": [{
+      "type": "command",
+      "command": "python3 \"${PLUGIN_ROOT}/codex/scripts/ontology_hook.py\"",
+      "timeout": 60,
+      "statusMessage": "Reading the project ontology"
+    }] }],
+    "PostToolUse": [{ "matcher": "^(Bash|apply_patch|Edit|Write)$", "hooks": [{
+      "type": "command",
+      "command": "python3 \"${PLUGIN_ROOT}/codex/scripts/ontology_hook.py\"",
+      "timeout": 60,
+      "statusMessage": "Checking governed changes"
+    }] }],
+    "Stop": [{ "hooks": [{
+      "type": "command",
+      "command": "python3 \"${PLUGIN_ROOT}/codex/scripts/ontology_hook.py\"",
+      "timeout": 60,
+      "statusMessage": "Checking the ontology before finishing"
+    }] }]
+  }
+}

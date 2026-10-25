@@ -1,0 +1,12 @@
+{
+  "name": "muddybootscode-odscai-2026",
+  "interface": { "displayName": "Muddy Boots Code — ODSC AI 2026" },
+  "plugins": [
+    {
+      "name": "ontology-driven-dev",
+      "source": { "source": "local", "path": "./" },
+      "policy": { "installation": "AVAILABLE", "authentication": "ON_INSTALL" },
+      "category": "Developer Tools"
+    }
+  ]
+}
