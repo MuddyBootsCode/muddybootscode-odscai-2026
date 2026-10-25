@@ -1,5 +1,20 @@
 # Ontology-driven development for Claude Code
 
+## ODSC AI West 2026 workshop
+
+The [workshop notebooks](notebooks/README.md) demonstrate how explicit domain
+definitions guide implementation and counterexamples:
+
+- [A river reading](notebooks/01_river_reading.ipynb): gauge, units, datum and time.
+- [One person isn't one row](notebooks/02_one_person_one_count.ipynb): identity,
+  relationships and reporting grain.
+
+Both use synthetic data and run without API keys. Each includes a versioned
+ontology, an agent prompt, deliberate counterexamples and an authored reference
+repair. Setup, saved outputs and facilitator guidance are included.
+
+## Skill and observer plugin
+
 One plugin, two parts:
 
 - **The `ontology-driven-dev` skill** (`skills/ontology-driven-dev/`). It gives a repo a written ontology in `ontology/<domain>.md`: entities, relationships, invariants with the gate that enforces each, vocabulary, intent and scope. Its scripts query the ontology, validate it, and run as hooks that stop a change to governed code when the ontology was not updated with it.
