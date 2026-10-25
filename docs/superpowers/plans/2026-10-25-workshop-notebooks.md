@@ -44,4 +44,4 @@ Files: `notebooks/build.py`, two `.ipynb` files, `notebooks/README.md`, `noteboo
 - [x] Execute both notebooks in fresh Jupyter kernels and validate notebook schemas.
 - [x] Check expected mistakes and repairs, inspect rendered HTML structure/outputs, and verify source synchronization. Local browser visual inspection was unavailable.
 - [x] Run existing Python tests and notebook tests; review scope and public content. See `notebooks/VERIFICATION.md` for the unavailable observer runtime.
-- [ ] Commit and push the workshop branch, create a reviewable PR, and reread published files.
+- [x] Commit and push the workshop branch, create a reviewable PR, and reread published files. PR #1 is open; both published notebook blob hashes match local files and retain executed outputs. Review/merge remains pending.
