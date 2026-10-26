@@ -1,4 +1,41 @@
-# Verification record — October 25, 2026
+# Verification record — October 26, 2026
+
+## River replacement
+
+- Replaced `01_river_reading.ipynb` in place with the 13-cell forecast-flooding
+  walkthrough. The existing notebook path and Colab links are retained.
+- Executed all 5 code cells in a fresh Jupyter kernel launched from an empty
+  temporary directory. Saved execution counts and outputs; no unhandled error
+  outputs. Baseline: 4 passing checks. Deliberate early return: 2 failures, both
+  named FLOOD-01 checks. Repair: the same 4 checks pass.
+- The notebook captures deliberate failures so the teaching sequence can finish.
+  Separately verified the documented blocking-runner pattern in subprocesses:
+  baseline exits 0, broken candidate exits 1, repaired candidate exits 0.
+- `python3 -m unittest discover -s notebooks/tests -v`: 16 tests passed (7 river,
+  9 higher education), including rejection of both the early-return mutation and
+  a mutation that excludes forecast equality at flood stage.
+- `python3 notebooks/build.py --check`: both notebooks match their canonical
+  lesson sources and embedded ontology documents.
+- `nbformat.validate`: the replacement notebook is valid before and after execution.
+- Higher-education notebook, lesson, ontology and test class are unchanged.
+  Skill and plugin implementation files are unchanged.
+- `git diff --check`: passed.
+
+The synthetic case is 12 ft observed, 18 ft forecast crest and 13 ft flood stage.
+The expected assessment is `forecast_flooding`. Location, datum, units, finite
+values and valid forecast window are stated preconditions, not validation supplied
+by this small function. No forecast calculation, official warning issuance,
+installed hook, required CI check or controlled model comparison is claimed.
+
+Execution environment: Python 3.15.0, nbformat 5.11.1, nbclient 0.11.0,
+ipykernel 7.4.0. Python 3.10 remains the intended language floor; no claim of
+testing every supported runtime is made. Review used the saved cell sources and
+execution outputs; no new browser or Colab runtime execution is claimed.
+
+## Prior notebook release — October 25, 2026
+
+Historical verification below applies to the original comparison lesson, which
+the forecast-flooding lesson above replaces.
 
 - Both notebooks executed to completion in separate fresh Jupyter kernels, each
   launched in an empty temporary directory. All 5 code cells in each notebook

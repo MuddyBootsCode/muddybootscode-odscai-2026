@@ -5,7 +5,7 @@ use it to guide code, and check the consequences with named counterexamples.
 
 | Notebook | Question | Domain knowledge that determines the implementation |
 |---|---|---|
-| [1. A river reading](01_river_reading.ipynb) | Can we compare this reading with this threshold? | Gauge, quantity, datum, units and time |
+| [1. The river hasn't reached flood stage. Do we wait?](01_river_reading.ipynb) | Should a below-threshold observation suppress forecast flooding? | Observed stage, forecast crest, local flood stage and FLOOD-01 |
 | [2. One person isn't one row](02_one_person_one_count.ipynb) | How many people completed a degree at this institution? | Identity, relationship cardinality, cohort and reporting unit |
 
 **Start by reading each ontology, not by fixing the code.** Identify the things,
@@ -33,25 +33,39 @@ python -m jupyter lab notebooks
 ```
 
 On Windows activate with `.venv-notebooks\Scripts\activate` instead.
-Select **Restart Kernel and Run All Cells** for a clean walkthrough. The faulty
-candidate reports expected failures as data; execution then continues to the
-reference repair. To practice, stop before the reference repair, add a code cell
-with your implementation and pass it to the lesson's `check_*_rules` function.
-Keep the domain and checks fixed during a repair.
+For the guided walkthrough, read one cell, predict the result, then run the next
+code cell with **Shift + Enter**. Select **Restart Kernel and Run All Cells** for
+a clean replay. Expected failures are captured so execution can continue to the
+repair. To practice, add a code cell with your implementation and pass it to
+`run_gate(your_function)` in the river notebook or the `check_*_rules` function
+in the higher-education notebook. Keep the domain and checks fixed during a repair.
 
 ## What this demonstrates
 
-Each notebook embeds the canonical [river](ontology/river.md) or
+Each notebook embeds its canonical [river](ontology/river.md) or
 [higher-education](ontology/higher_education.md) ontology with a content hash.
 The ontology identifies why a function needs particular logic. Named counterexamples
 show whether a candidate obeys those rules. The source files link the rules to
 the implementation and repository tests.
 
+The river notebook is a **13-cell crayons-and-glue walkthrough**: terms and
+relationships → FLOOD-01 → named inputs → executable checks → working code →
+deliberate mistake → repair. With **12 ft observed**, an **18-ft forecast crest**
+and **13-ft flood stage**, the expected answer is `forecast_flooding`. Being below
+flood stage now must not suppress a supplied forecast that reaches or exceeds it.
+An early return introduces that exact mistake. The same four tests in `run_gate`
+show **PASS → FAIL → PASS**; both the forecast-exceedance and equality checks fail
+for the broken version. Comments distinguish domain meaning from test machinery.
+
+The observation and forecast values are synthetic. The fixture assumes the same
+forecast point, datum and units, finite values, and an accepted forecast for the
+relevant near-term window. The small function does not validate that metadata,
+generate forecasts or issue official warnings. `no_threshold_exceedance` only
+describes the supplied values; it does not mean the area is safe.
+
 The higher-ed fixture yields **5 joined profile rows, 2 people and 3 completed
 degrees**. Each number has a different meaning. Employment records must not
-change the number of graduates. The river fixture's 2.4 meters exceeds the
-invented 7-foot comparison threshold after conversion; wrong context yields
-**unavailable**, which is distinct from **below**.
+change the number of graduates.
 
 Reference mistakes and repairs are authored teaching examples, not reported agent
 runs. To investigate the effect of ontology context on your agent, use the

@@ -7,18 +7,43 @@ break/fix exercise remains separate.
 
 ## River walkthrough
 
-1. Show `2.4` and ask what it measures. Reveal the gauge, unit, datum and timestamp.
-2. Read the domain statements before the function. Explain why those relationships
-   determine whether comparison is meaningful.
-3. Ask the audience to predict the raw-number comparison and then the unit-aware answer.
-4. Run the named counterexamples. Ask why a different datum returns unavailable.
-5. Show the reference repair and point from each rule to the code that implements it.
-6. Ask what a passed test does not establish: it does not validate a flood forecast,
-   sensor accuracy, every possible input or a release policy.
+Use the 13-cell annotated notebook one cell at a time. Read, predict, then run
+the next code cell with **Shift + Enter**. Repeat: **meaning → code → check**.
 
-The 7-foot threshold and 15-minute freshness policy are invented classroom choices.
-The hydrological distinction between gage height and water depth follows the USGS
-references in the ontology. Do not interpret a below-threshold result as safe.
+1. **Cells 1–2:** start with recognizing forecast flooding before the water arrives.
+   Distinguish observed stage, forecast crest and the local flood-stage threshold.
+   Read FLOOD-01 and its rationale before showing the implementation. The rule is
+   written context; Python does not translate the paragraph into a test.
+2. **Cells 3–4:** ask for a prediction using **12 ft observed**, **18 ft forecast**
+   and **13 ft flood stage**. Point out how the variable names preserve measurement,
+   prediction, threshold and feet. Printing the values does not make a decision.
+3. **Cells 5–6:** show the answer key: `forecast_flooding`, required by FLOOD-01.
+   The four tests check forecast exceedance, equality, observed flooding and no
+   threshold exceedance. Separate those expectations from `unittest` and `StringIO`,
+   which run the checks and collect the report. This cell defines `run_gate`; it
+   does not run the checks yet.
+4. **Cells 7–8:** connect each branch of `assess_flood_risk` to its domain meaning,
+   then run the gate. The baseline passes all four checks.
+5. **Cells 9–10:** add the deliberate early return for an observed stage below
+   flood stage. Ask which checks will fail. That exit skips the forecast, so the
+   unchanged forecast-exceedance and equality checks fail. `assert not broken_passed`
+   confirms the demonstration caught the bug; it does not approve the broken code.
+6. **Cells 11–13:** remove the early exit and rerun the same gate. Show
+   **PASS → FAIL → PASS**. The rule and expected answers stayed fixed; the code was
+   repaired. Point from the failed test's FLOOD-01 label back to the written rule.
+
+The observation and forecast are synthetic classroom values. The fixture assumes
+the same point, datum and units, finite values, and an accepted forecast for the
+relevant near-term window. This function does not validate those preconditions,
+produce a hydrologic forecast or issue an official warning. Do not interpret
+`no_threshold_exceedance` as safe. Discharge and rating curves provide vocabulary
+context; this lesson does not calculate them.
+
+The test cases are independent of the displayed inputs in Cell 4. Changing those
+inputs does not change the acceptance criteria. The notebook captures the expected
+test failures so a clean **Restart Kernel and Run All Cells** replay reaches the
+repair. Ask what additional rules would be needed for stale or missing forecasts,
+the wrong forecast point, or mismatched height references.
 
 ## Higher-education walkthrough
 
@@ -43,9 +68,13 @@ reference repair. If you reveal failed tests for a repair round, do so equally.
 
 Suggested initial tasks:
 
-- River: "Compare the supplied observation with the threshold. Implement
-  `compare_reading(reading, threshold, now)` returning `status`, `reason`, and
-  `value_ft`. Explain your interpretation. Use only the Python standard library."
+- River: "Assess the supplied observed stage and forecast crest against this
+  location's flood stage. Implement
+  `assess_flood_risk(observed_stage_ft, forecast_crest_ft, flood_stage_ft)` returning
+  `observed_flooding`, `forecast_flooding`, or `no_threshold_exceedance`.
+  Inputs are prevalidated for the same point, datum and units, with an accepted
+  near-term forecast. Explain your interpretation. Use only the Python standard
+  library; do not calculate a forecast or issue an official warning."
 - Higher education: "Count people with a completed degree at North in the supplied
   snapshot. Implement `count_graduates(completions, institution_id)` and explain
   your interpretation. Use only the Python standard library."

@@ -1,7 +1,6 @@
 """Behavioral checks for the exact code shipped in the notebooks."""
 import contextlib
 import io
-import math
 from pathlib import Path
 import runpy
 import unittest
@@ -21,72 +20,54 @@ class RiverTests(unittest.TestCase):
     def setUpClass(cls):
         cls.ns = lesson("river_reading")
 
-    def compare(self, **changes):
-        reading = dict(self.ns["READING"], **changes)
-        return self.ns["compare_reading"](reading, self.ns["THRESHOLD"], self.ns["NOW"])
+    def test_flood_01_forecast_exceedance(self):
+        for name in ["correct_assessment", "assess_flood_risk"]:
+            with self.subTest(version=name):
+                self.assertEqual(self.ns[name](12.0, 18.0, 13.0), "forecast_flooding",
+                                 "FLOOD-01: below now must not suppress forecast flooding")
 
-    def test_riv_01_units_change_the_answer(self):
-        self.assertEqual(self.compare()["status"], "at_or_above")
-        self.assertAlmostEqual(self.compare()["value_ft"], 7.874015748)
-        self.assertEqual(self.compare(value=7, unit="ft")["status"], "at_or_above")
-        self.assertEqual(self.compare(value=6.9, unit="ft")["status"], "below")
+    def test_flood_01_equal_threshold(self):
+        self.assertEqual(self.ns["assess_flood_risk"](12.0, 13.0, 13.0),
+                         "forecast_flooding", "FLOOD-01: reaching flood stage counts")
 
-    def test_riv_01_converted_equality_is_included_without_rounding_up(self):
-        self.assertEqual(self.compare(value=2.1336, unit="m")["status"], "at_or_above")
-        self.assertEqual(self.compare(value=2.133599999, unit="m")["status"], "below")
+    def test_observed_flooding_has_priority_including_equality(self):
+        for observed in [13.0, 14.0]:
+            for forecast in [12.5, 18.0]:
+                with self.subTest(observed=observed, forecast=forecast):
+                    self.assertEqual(self.ns["assess_flood_risk"](observed, forecast, 13.0),
+                                     "observed_flooding")
 
-    def test_riv_02_wrong_context_is_unavailable(self):
-        for field, value in [("gauge_id", "OTHER"), ("datum", "OTHER"), ("quantity", "discharge")]:
-            with self.subTest(field=field):
-                self.assertEqual(self.compare(**{field: value})["status"], "unavailable")
+    def test_both_below_threshold(self):
+        self.assertEqual(self.ns["assess_flood_risk"](12.0, 12.5, 13.0),
+                         "no_threshold_exceedance")
 
-    def test_riv_03_time_boundary_and_timezone(self):
-        cases = [("2026-10-25T11:45:00+00:00", "at_or_above"),
-                 ("2026-10-25T11:44:59+00:00", "unavailable"),
-                 ("2026-10-25T12:00:01+00:00", "unavailable"),
-                 ("2026-10-25T06:55:00-05:00", "at_or_above"),
-                 ("2026-10-25T11:55:00", "unavailable"),
-                 ("bad-time", "unavailable")]
-        for stamp, expected in cases:
-            with self.subTest(stamp=stamp):
-                self.assertEqual(self.compare(observed_at=stamp)["status"], expected)
+    def test_deliberate_shortcut_fails_named_forecast_checks(self):
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            passed = self.ns["run_gate"](self.ns["broken_assessment"])
+        self.assertFalse(passed)
+        self.assertIn("FAILED (failures=2)", output.getvalue())
+        self.assertIn("FAIL: test_flood_01_forecast_exceedance", output.getvalue())
+        self.assertIn("FAIL: test_flood_01_equal_threshold", output.getvalue())
+        self.assertIn("FLOOD-01", output.getvalue())
 
-    def test_riv_04_missing_and_nonfinite_are_unavailable(self):
-        for value in [None, math.nan, math.inf, -math.inf, True, "2.4"]:
-            with self.subTest(value=value):
-                self.assertEqual(self.compare(value=value)["status"], "unavailable")
-        self.assertEqual(self.compare(unit="cfs")["status"], "unavailable")
-        for field in self.ns["READING"]:
-            reading = dict(self.ns["READING"])
-            del reading[field]
-            self.assertEqual(self.ns["compare_reading"](reading, self.ns["THRESHOLD"], self.ns["NOW"])["status"], "unavailable")
+    def test_gate_rejects_excluding_the_equality_boundary(self):
+        def excludes_equality(observed, forecast, threshold):
+            if observed >= threshold:
+                return "observed_flooding"
+            if forecast > threshold:
+                return "forecast_flooding"
+            return "no_threshold_exceedance"
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertFalse(self.ns["run_gate"](excludes_equality))
 
-    def test_negative_stage_is_not_automatically_invalid(self):
-        self.assertEqual(self.compare(value=-0.1, unit="ft")["status"], "below")
-
-    def test_bad_threshold_and_clock_raise(self):
-        for change in [{"unit": "m"}, {"value": math.nan}, {"gauge_id": ""}, {"quantity": "discharge"}]:
-            with self.subTest(change=change), self.assertRaises(ValueError):
-                self.ns["compare_reading"](self.ns["READING"], dict(self.ns["THRESHOLD"], **change), self.ns["NOW"])
-        with self.assertRaises(ValueError):
-            self.ns["compare_reading"](self.ns["READING"], self.ns["THRESHOLD"], self.ns["NOW"].replace(tzinfo=None))
-
-    def test_rule_checks_reject_faulty_candidate(self):
-        self.assertGreater(len(self.ns["check_river_rules"](self.ns["compare_without_context"])), 0)
-        self.assertEqual(self.ns["check_river_rules"](self.ns["compare_reading"]), [])
-
-    def test_downloaded_river_checks_reject_missing_result_context(self):
-        def status_only(reading, threshold, now):
-            return {"status": self.ns["compare_reading"](reading, threshold, now)["status"]}
-        self.assertGreater(len(self.ns["check_river_rules"](status_only)), 0)
-
-    def test_downloaded_river_checks_require_fifteen_minute_boundary(self):
-        def too_strict(reading, threshold, now):
-            result = self.ns["compare_reading"](reading, threshold, now)
-            if reading.get("observed_at") == "2026-10-25T11:45:00+00:00":
-                return {"status": "unavailable", "reason": "too strict", "value_ft": None}
-            return result
-        self.assertGreater(len(self.ns["check_river_rules"](too_strict)), 0)
+    def test_unchanged_gate_passes_baseline_and_repair(self):
+        self.assertIs(self.ns["baseline_passed"], True)
+        self.assertIs(self.ns["broken_passed"], False)
+        self.assertIs(self.ns["repaired_passed"], True)
+        for name in ["correct_assessment", "assess_flood_risk"]:
+            with self.subTest(version=name), contextlib.redirect_stdout(io.StringIO()):
+                self.assertTrue(self.ns["run_gate"](self.ns[name]))
 
 
 class HigherEducationTests(unittest.TestCase):

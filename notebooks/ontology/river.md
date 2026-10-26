@@ -1,75 +1,76 @@
 ---
 domain: workshop-river
-version: 1
+version: 2
 governs:
   - "notebooks/lessons/river_reading.py"
 ---
 
-# River: what does this reading mean?
+## Cell 2 · Give the pieces names and explain how they connect
 
-## Intent
+**Crayons and glue:** label the things before drawing arrows between them.
+Here the labels distinguish a measurement, a prediction and a threshold.
+Calling all three simply “water level” would hide why they behave differently.
 
-Compare one synthetic gage-height observation with a classroom threshold.
-Return **at_or_above**, **below**, or **unavailable**, with a reason.
-The result describes only this comparison. It is not a flood forecast or warning.
+| Term | Meaning |
+|---|---|
+| **Stage** | Water-surface height relative to a gauge's reference datum. |
+| **Discharge** | Volume passing a location per unit time, commonly cubic feet per second. |
+| **Rating curve** | A site-specific relationship between stage and discharge. |
+| **Observed stage** | A measured stage with a location and observation time. |
+| **Forecast crest** | The highest stage predicted for an event, with its expected time. |
+| **Flood stage** | A flood threshold belonging to a particular forecast point. |
 
-## Entities and relationships
+**Relationships:** an observation is measured at a gauge; a forecast is for a
+forecast point; a threshold applies to that point. This example uses the
+Wimberley gauge / forecast-point mapping, the same height reference, and feet.
 
-- **Gauge**: a measurement location, identified by `gauge_id`.
-- **Observation**: a quantity and value at a gauge and an offset-aware instant;
-  carries a unit and datum. This lesson handles one observation at a time.
-- **Threshold**: a demonstration comparison value for one gauge, quantity and
-  datum. The threshold contract uses feet.
-- `(Observation)-[OBSERVED_AT]->(Gauge)`: exactly one gauge per observation.
-- `(Threshold)-[APPLIES_TO]->(Gauge)`: exactly one gauge per threshold.
-- Each observation and threshold names the reference datum for its height.
+> **FLOOD-01 — Preserve forecast flooding**
+>
+> When a supplied, valid forecast reaches or exceeds the location's flood stage,
+> the assessment must identify forecast flooding even while the observed stage
+> is below flood stage.
+>
+> **Why:** waiting for observed flooding loses the opportunity to warn before
+> the water arrives.
 
-## Vocabulary and rationale
+**Executable check:** `FloodTests.test_flood_01_forecast_exceedance`
+→ checks `assess_flood_risk`.
 
-**Gage height / stage** is water-surface height relative to a reference datum;
-it is not necessarily water depth. Different sites can use different datums.
-**Discharge** is a volume per unit time, a different quantity.
-**Unavailable** means this contract cannot make a comparison; it does not mean
-below threshold, safe, zero, or that no observation exists elsewhere.
+`FLOOD-01` is a stable name for this rule. We repeat it in the test name and
+failure message so a failed check points back to the reason it exists.
+We, as developers, write that connection; Python does not translate this paragraph.
 
-## Invariants
+Fixture preconditions: same location and datum, finite values in feet, and an
+accepted forecast for the relevant near-term window. Those checks are outside
+this small function; they are not silently implemented here.
 
-- **RIV-01 — Comparable units:** Convert supported lengths to feet before comparing;
-  equality is at_or_above. A number without its unit has no usable comparison meaning.
-  [gate: `RiverTests.test_riv_01_units_change_the_answer`; code: `compare_reading`]
-- **RIV-02 — Shared context:** Gauge, gage-height quantity and datum must match.
-  Converting units cannot fix a different physical reference.
-  [gate: `RiverTests.test_riv_02_wrong_context_is_unavailable`; code: `compare_reading`]
-- **RIV-03 — Explicit time policy:** Both times must have offsets. Age must be
-  between zero and 15 minutes inclusive. Future or older observations are unavailable.
-  The 15-minute limit is a classroom policy, not a hydrological standard.
-  [gate: `RiverTests.test_riv_03_time_boundary_and_timezone`; code: `compare_reading`]
-- **RIV-04 — Absence stays explicit:** Missing/nonfinite values, missing context,
-  unsupported units or unparseable observation times yield unavailable. Never
-  substitute zero or below. A negative stage can be meaningful relative to a datum.
-  [gate: `RiverTests.test_riv_04_missing_and_nonfinite_are_unavailable`; code: `compare_reading`]
+### Decision contract and check links
 
-## Function and test links
+`assess_flood_risk(observed_stage_ft, forecast_crest_ft, flood_stage_ft)`
+returns `observed_flooding` when the observed stage reaches or exceeds flood stage;
+otherwise `forecast_flooding` when the forecast crest reaches or exceeds it;
+otherwise `no_threshold_exceedance`. These are assessment labels, not public alerts.
+An observed exceedance takes priority over a predicted exceedance.
 
-Implementation: `notebooks/lessons/river_reading.py`, `compare_reading`.
-Behavioral checks: `notebooks/tests/test_lessons.py`, `RiverTests`.
-Notebook counterexamples: `check_river_rules(candidate)` runs the candidate against
-named rules. Run repository checks with `python3 -m unittest discover -s notebooks/tests -v`.
-This is an explicit human-authored mapping; it does not prove complete coverage.
-No required CI or branch protection is established by this notebook.
+FLOOD-01 is checked in the notebook by `run_gate(candidate)` and in the repository:
+[gate: `notebooks/tests/test_lessons.py:RiverTests.test_flood_01_forecast_exceedance`; code: `assess_flood_risk`]
+[gate: `notebooks/tests/test_lessons.py:RiverTests.test_flood_01_equal_threshold`; code: `assess_flood_risk`]
 
-## Scope and sources
+Run `python3 -m unittest discover -s notebooks/tests -v` for repository checks.
+These links document the human-authored rule-to-test mapping; they do not install
+hooks or require CI. The notebook's expected failed candidate is teaching evidence,
+not a successful acceptance result for that candidate.
 
-Synthetic gauge, datum, readings and threshold; fixed demonstration clock.
-Only `ft` and `m` input units are supported; 1 foot = 0.3048 meters.
-Malformed threshold configuration or a naive evaluation clock raises `ValueError`.
-No datum conversion, upstream propagation, sensor-quality assessment, rating curve,
-forecasting, missing-reading interpolation, operational freshness policy or safety decision.
-Passing these checks does not establish that a sensor reading is physically accurate.
+### Sources and scope
 
-Domain references: [USGS: Why we use gage height](https://waterdata.usgs.gov/blog/gage_height/),
-[USGS: Why gage height is not measured from the stream bottom](https://www.usgs.gov/faqs/why-doesnt-usgs-measure-gage-height-bottom-stream).
+[NWS Wimberley forecast point](https://water.noaa.gov/gauges/wmbt2),
+[USGS stage/discharge relationship](https://www.usgs.gov/faqs/how-a-rating-curve-used-convert-gage-height-streamflow).
+The scenario values are synthetic. The function consumes a supplied forecast;
+it does not estimate discharge, calculate a forecast, validate the fixture
+preconditions, or issue an official warning.
 
-## Changelog
+### Changelog
 
-- 2026-10-25 — Initial workshop contract with explicit comparison outcomes.
+- 2026-10-26 — Replaced the unit-conversion lesson with the forecast-flooding
+  decision contract and FLOOD-01. The old RIV-01 through RIV-04 comparison rules
+  are retired for this lesson; their validation behavior is not carried forward.

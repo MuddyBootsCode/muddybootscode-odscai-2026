@@ -10,13 +10,17 @@ lifecycle hooks.
 The [workshop notebooks](notebooks/README.md) demonstrate how explicit domain
 definitions guide implementation and counterexamples:
 
-- [A river reading](notebooks/01_river_reading.ipynb): gauge, units, datum and time.
+- [The river hasn't reached flood stage. Do we wait?](notebooks/01_river_reading.ipynb):
+  preserve forecast flooding when the observed stage is still below flood stage.
 - [One person isn't one row](notebooks/02_one_person_one_count.ipynb): identity,
   relationships and reporting grain.
 
-Both use synthetic data and run without API keys. Each includes a versioned
-ontology, an agent prompt, deliberate counterexamples and an authored reference
-repair. Setup, saved outputs and facilitator guidance are included.
+Both use synthetic data and run without API keys. Each connects a versioned
+ontology to executable checks and authored teaching code. The river walkthrough
+keeps FLOOD-01 and four ordinary unit tests fixed while a deliberate early return
+breaks the assessment, then repairs the code. It uses a supplied forecast; it
+does not calculate a forecast or issue an official warning. Setup, saved outputs
+and facilitator guidance, including optional agent prompts, are included.
 
 ## Skill and observer plugin
 
