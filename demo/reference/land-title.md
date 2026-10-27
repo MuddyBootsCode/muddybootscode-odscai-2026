@@ -35,7 +35,7 @@ and the owners of the tracts under it on one page.
 - `(Operator)-[OPERATES]->(Lease)`  1..*
 - `(Lease)-[COVERS]->(Tract)`  1..*
 - `(Lease)-[HAS]->(Well)`  1..*
-- `(Tract)-[OWNED_BY {interest, since}]->(MineralOwner)`  1..*  (fractional interests; `since` is the event_id that created the edge)
+- `(Tract)-[OWNED_BY]->(MineralOwner)`  1..*  (edge properties: `interest`, a fraction; `since`, the event_id that created the edge)
 - `(TitleEvent)-[CHANGES]->(Tract)`  1
 
 ## Invariants

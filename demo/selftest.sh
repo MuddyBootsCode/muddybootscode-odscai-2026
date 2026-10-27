@@ -7,14 +7,20 @@
 #   red test, reconciliation query, seed fix, commit blocked, ontology
 #   updated, commit passes.
 #
-# Needs Docker running and the neo4j:5-enterprise image present. Starts the
-# database cold, like the on-stage sequence, and leaves it running after. The real copy (~/Projects/land-title)
+# Needs Docker running and the neo4j:5-enterprise image present. Runs its own
+# Neo4j on separate ports and removes it at the end; a rehearsal database in
+# ~/Projects/land-title keeps running. The real copy (~/Projects/land-title)
 # is not touched: this runs in $SELFTEST_DIR (default /tmp/land-title-selftest).
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN="$(cd "$HERE/.." && pwd)"
 export DEMO_DIR="${SELFTEST_DIR:-/tmp/land-title-selftest}"
+# Its own Compose project and ports, so a rehearsal database in ~/Projects/land-title is untouched.
+export COMPOSE_PROJECT_NAME=land-title-selftest
+export LANDTITLE_HTTP_PORT="${SELFTEST_HTTP_PORT:-7484}"
+export LANDTITLE_BOLT_PORT="${SELFTEST_BOLT_PORT:-7697}"
+export LANDTITLE_NEO4J_URI="bolt://localhost:$LANDTITLE_BOLT_PORT"
 CHECK=.claude/skills/ontology-driven-dev/scripts/ontology_check.py
 step() { printf '\n\033[1m== %s\033[0m\n' "$*"; }
 expect_block() { # run a checker command, require exit 2
@@ -30,6 +36,7 @@ cd "$DEMO_DIR"
 step "neo4j up"
 docker compose down -v >/dev/null 2>&1 || true   # start cold, as on stage
 docker compose up -d --wait >/dev/null 2>&1
+trap 'docker compose -f "$HERE/land-title/docker-compose.yml" down -v >/dev/null 2>&1 || true' EXIT
 
 step "tests green before the ontology"
 uv run pytest -q 2>&1 | tail -1
@@ -40,6 +47,9 @@ rm ontology/EXAMPLE.md
 cp "$HERE/reference/land-title.md" ontology/land-title.md
 sed -i '' 's#| (example) | EXAMPLE.md | see front matter |#| Land and title | land-title.md | cypher/**, landtitle/**, tests/** |#' ontology/README.md
 python3 $CHECK --validate
+QUERY=.claude/skills/ontology-driven-dev/scripts/ontology_query.py
+python3 $QUERY entity MineralOwner | grep -q 'OWNED_BY' || { echo "reference ontology lost OWNED_BY in parsing"; exit 1; }
+[ "$(python3 $QUERY section Relationships | grep -c -- '->')" -eq 5 ] || { echo "expected 5 relationships to parse"; exit 1; }
 git add -A && git commit -q -m "Add the land-title ontology and its hooks"
 
 step "E1: current_owner on Well blocks the per-edit check"
@@ -110,4 +120,5 @@ PY
 git add -A && git commit -q -m "Reconcile fractional interests per tract" 2>/dev/null
 git log --oneline | head -1
 
-step "all steps behaved; neo4j left running"
+rm -rf "$DEMO_DIR"
+step "all steps behaved"

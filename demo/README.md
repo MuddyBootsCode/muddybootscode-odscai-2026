@@ -8,7 +8,7 @@ them live, then breaks things.
 | File | What it is for |
 |---|---|
 | `reset.sh` | Materialize `land-title/` as a fresh git repo at `~/Projects/land-title`. Run before every rehearsal and before the talk. |
-| `selftest.sh` | Replay every step that does not need Claude, in a scratch copy. Run the night before. |
+| `selftest.sh` | Replay every step that does not need Claude, in a scratch copy with its own Neo4j on ports 7484/7697. Run the night before. |
 | `INTERVIEW.md` | Your answers to the skill's five interview questions. |
 | `PROMPTS.md` | The prompts to paste, with what should happen after each. |
 | `OFFLINE.md` | The terminal-only TDD piece, for when the network is gone. |
@@ -18,7 +18,7 @@ them live, then breaks things.
 
 ```bash
 docker pull neo4j:5-enterprise          # needs network; do it at the hotel
-bash demo/selftest.sh                   # every step, no Claude, ~1 minute
+bash demo/selftest.sh                   # every step, no Claude, ~1 minute, cleans up after itself
 bash demo/reset.sh                      # fresh ~/Projects/land-title
 ```
 
