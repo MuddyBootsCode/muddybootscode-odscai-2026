@@ -64,3 +64,9 @@ The pane reads `.claude/ontology-state.jsonl`, which the checker scripts write o
 A gate-file card names the file, the function and lines that changed, the diff, and why the rule was flagged. Every rule whose gate names the file is flagged. A rule whose gate names a different function of that file is listed after the direct hits, because its gate may call the changed code. Naming the function needs `node` and a `typescript` package in the repo's `node_modules`, or `ONTOLOGY_TYPESCRIPT_DIR` pointing at one. Without them the card names the file and lines only.
 
 The per-edit check runs on Claude's own edits. An edit saved in your editor is seen by the end-of-turn and commit checks.
+
+## Demo
+
+`demo/` holds a small land-and-title Neo4j codebase with no ontology, the
+run of show for adding one live, prompts that make the checks fire, and an
+offline test-driven piece. Start at `demo/README.md`.
