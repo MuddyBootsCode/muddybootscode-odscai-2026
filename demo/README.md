@@ -31,7 +31,7 @@ shows a pane, empty is fine). The install line is in the top-level README.
 
    ```bash
    cd ~/Projects/land-title
-   docker compose up -d
+   docker compose up -d --wait
    uv run pytest -q
    ```
 
@@ -59,7 +59,7 @@ bash demo/reset.sh
 ```
 
 It stops the Neo4j container, replaces the copy, and leaves one commit. The
-next `docker compose up -d` is step 1 again.
+next `docker compose up -d --wait` is step 1 again.
 
 ## If the interview went sideways
 
@@ -74,6 +74,8 @@ python3 .claude/skills/ontology-driven-dev/scripts/ontology_check.py --validate
 
 ## Known edges
 
+- `docker compose up -d --wait` blocks on the healthcheck in the compose file, so
+  the first `pytest` never races a cold Neo4j. Plain `up -d` returns too early.
 - `reset.sh` refuses to delete a directory it did not create, so a real
   `~/Projects/land-title` of your own is safe. Set `DEMO_DIR` to put the copy
   elsewhere.

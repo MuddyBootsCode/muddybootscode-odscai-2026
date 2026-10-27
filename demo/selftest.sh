@@ -7,8 +7,8 @@
 #   red test, reconciliation query, seed fix, commit blocked, ontology
 #   updated, commit passes.
 #
-# Needs Docker running and the neo4j:5-enterprise image present. Leaves the
-# container running for the real demo. The real copy (~/Projects/land-title)
+# Needs Docker running and the neo4j:5-enterprise image present. Starts the
+# database cold, like the on-stage sequence, and leaves it running after. The real copy (~/Projects/land-title)
 # is not touched: this runs in $SELFTEST_DIR (default /tmp/land-title-selftest).
 set -euo pipefail
 
@@ -28,11 +28,8 @@ bash "$HERE/reset.sh" >/dev/null
 cd "$DEMO_DIR"
 
 step "neo4j up"
-docker compose up -d >/dev/null 2>&1
-for _ in $(seq 1 45); do
-  docker exec land-title-neo4j wget -qO- http://localhost:7474 >/dev/null 2>&1 && break
-  sleep 2
-done
+docker compose down -v >/dev/null 2>&1 || true   # start cold, as on stage
+docker compose up -d --wait >/dev/null 2>&1
 
 step "tests green before the ontology"
 uv run pytest -q 2>&1 | tail -1
@@ -54,7 +51,9 @@ expect_block sh -c "echo '{\"tool_input\":{\"file_path\":\"$PWD/landtitle/model.
 
 step "E1: the Stop check blocks once, then passes through"
 expect_block sh -c "echo '{}' | python3 $CHECK --changed --stop"
-echo '{"stop_hook_active": true}' | python3 $CHECK --changed --stop >/dev/null 2>&1 && echo "passed through on the second stop"
+set +e; echo '{"stop_hook_active": true}' | python3 $CHECK --changed --stop >/dev/null 2>/tmp/selftest-err; rc=$?; set -e
+if [ "$rc" -ne 0 ]; then echo "expected exit 0 on the second stop, got $rc:"; cat /tmp/selftest-err; exit 1; fi
+echo "passed through on the second stop"
 git checkout -q -- .
 
 step "E1b: weakening a gate test blocks the per-edit check"

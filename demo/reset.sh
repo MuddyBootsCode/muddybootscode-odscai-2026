@@ -38,7 +38,7 @@ land-title is at $DEST (fresh repo, 1 commit, no ontology)
 
 next:
   cd $DEST
-  docker compose up -d
+  docker compose up -d --wait
   uv run pytest
 then open $DEST in Claude Code and follow demo/README.md
 MSG

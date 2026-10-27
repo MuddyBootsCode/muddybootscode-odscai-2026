@@ -7,7 +7,7 @@ chain recorded as `TitleEvent` nodes.
 ## Run
 
 ```
-docker compose up -d
+docker compose up -d --wait
 uv sync
 uv run pytest
 ```
