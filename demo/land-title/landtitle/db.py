@@ -4,7 +4,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from neo4j import Driver, GraphDatabase
+from neo4j import Driver, GraphDatabase, RoutingControl
 
 CYPHER_DIR = Path(__file__).resolve().parent.parent / "cypher"
 
@@ -24,10 +24,12 @@ LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1"}
 def reset(driver: Driver) -> None:
     """Delete every node. Only for the local dev graph, which cypher/ rebuilds.
 
-    The guard asks the driver which host it is connected to, not the
-    environment, so a driver built some other way cannot slip past it.
+    The guard asks the driver which server runs its writes, not the
+    environment: a write-routed probe reports the host that executed it, so a
+    routing driver whose reader is local but whose writer is not is refused.
     """
-    host = driver.get_server_info().address.host
+    probe = driver.execute_query("RETURN 1", routing_=RoutingControl.WRITE)
+    host = probe.summary.server.address.host
     if host not in LOCAL_HOSTS:
         raise RuntimeError(f"refusing to wipe {host}: not a local database")
     driver.execute_query("MATCH (n) DETACH DELETE n")

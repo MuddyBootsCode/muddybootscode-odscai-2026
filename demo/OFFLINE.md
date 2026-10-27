@@ -63,7 +63,7 @@ sed -i '' "s/{interest: 0.3,  since: 'TE-007'}/{interest: 0.4,  since: 'TE-007'}
 uv run pytest -q
 ```
 
-`13 passed`.
+`14 passed`.
 
 ## 4. Commit. The gate says no.
 
