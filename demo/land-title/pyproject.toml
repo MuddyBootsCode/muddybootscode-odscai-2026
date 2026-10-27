@@ -1,0 +1,16 @@
+[project]
+name = "landtitle"
+version = "0.1.0"
+description = "Who owns what, under which lease, and is title clear."
+requires-python = ">=3.11"
+dependencies = ["neo4j>=5.20"]
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
