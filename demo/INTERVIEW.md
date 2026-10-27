@@ -38,16 +38,34 @@ and `PROMPTS.md` and `OFFLINE.md` assume it does.
 > TitleEvents don't reach the present has unverified title; it is not clear.
 > There is no such thing as a well with no lease.
 
-## Governed paths
+## Reading back the draft
 
-When the skill asks what the ontology governs, or drafts the list, confirm:
+Before the five questions the skill reads back what it inferred from the code
+(entities, relationships, candidate invariants). Confirm all of it. The answers
+above are the part it cannot infer.
+
+## Front matter
+
+When the skill asks what the ontology governs, or drafts the front matter,
+confirm these three blocks. The checker depends on all of them; the skill's own
+docs only describe `governs:`.
 
 ```yaml
 governs:
   - "cypher/**"
   - "landtitle/**"
   - "tests/**"
+declarations:
+  - "Well: Well"
+  - "Tract: Ownership"
+  - "TitleEvent: TitleEvent"
+parity:
+  - "cypher/constraints.cypher <-> landtitle/model.py"
 ```
+
+`declarations:` maps the classes in `landtitle/model.py` to entities; it is
+what makes an edit to `class Well` say "Well changed → entity Well".
+`parity:` says the constraints file and the model move together.
 
 `tests/**` is in the list because the tests are the gates, and each gate line
 names its test file (`tests/test_queries.py:test_...`). The checker matches

@@ -19,7 +19,9 @@ invariants), with `(inferred)` on every line it guessed. Then it asks the five
 questions in `INTERVIEW.md`.
 
 When the interview is done it validates and runs `install.sh`. Confirm the
-governed paths from `INTERVIEW.md` if it asks. One invariant should come out
+governed paths from `INTERVIEW.md` if it asks, and check the front matter has
+the `declarations:` and `parity:` blocks from `INTERVIEW.md`: the skill's own
+docs do not mention them, and the `Well → entity Well` card depends on them. One invariant should come out
 with no gate: "Every Well sits under at least one Lease." Leave it that way;
 it is the closing line of the offline piece. Then:
 
@@ -46,11 +48,12 @@ Expect, in order:
    writing) and may already refuse, quoting the rule "never stored as a property
    on a Well". If so, that is the demo: ask it to do it anyway, "just for the
    drilling page", and continue.
-2. The edit to `landtitle/model.py` is blocked by the per-edit check with:
+2. The edit to `landtitle/model.py` goes through (PostToolUse runs after the
+   write), and the per-edit check immediately feeds back:
    `Well (changed) → entity Well; gate file for invariant: Ownership of a Tract
    is the traversal ...`. The pane raises an issue card on `Well` naming the
    file and line, with Fix it, Explore issue and Leave it.
-3. Edits to `cypher/seed.cypher` and `landtitle/queries.py` are blocked the same
+3. Edits to `cypher/seed.cypher` and `landtitle/queries.py` are flagged the same
    way, as gate files of the ownership rule.
 4. When Claude tries to stop, the Stop hook blocks once more with the full list,
    a parity warning (`model.py` changed without `constraints.cypher`), and
@@ -75,7 +78,7 @@ traversal, as the ontology says, and keep the tests green.
 
 Expect: `wells_under` or a new query joins `Lease -[COVERS]-> Tract` to
 `owner_of`, no new property anywhere, a test, and a Changelog line in the
-ontology because `queries.py` is a gate file. The per-edit checks still fire
+ontology because `queries.py` is a gate file. The per-edit checks still flag
 (they always do on a gate file), but this time the ontology moves in the same
 change and the Stop check passes.
 

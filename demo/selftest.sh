@@ -26,7 +26,7 @@ step() { printf '\n\033[1m== %s\033[0m\n' "$*"; }
 expect_block() { # run a checker command, require exit 2
   set +e; "$@" >/dev/null 2>/tmp/selftest-err; local rc=$?; set -e
   if [ "$rc" -ne 2 ]; then echo "expected exit 2, got $rc:"; cat /tmp/selftest-err; exit 1; fi
-  echo "blocked (exit 2), as expected"
+  echo "flagged (exit 2), as expected"
 }
 
 step "reset into $DEMO_DIR"
@@ -52,7 +52,7 @@ python3 $QUERY entity MineralOwner | grep -q 'OWNED_BY' || { echo "reference ont
 [ "$(python3 $QUERY section Relationships | grep -c -- '->')" -eq 5 ] || { echo "expected 5 relationships to parse"; exit 1; }
 git add -A && git commit -q -m "Add the land-title ontology and its hooks"
 
-step "E1: current_owner on Well blocks the per-edit check"
+step "E1: current_owner on Well is flagged by the per-edit check (exit 2)"
 python3 - <<'PY'
 import pathlib
 m = pathlib.Path("landtitle/model.py"); m.write_text(m.read_text().replace("    spud: date\n", "    spud: date\n    current_owner: str | None = None\n", 1))
@@ -66,7 +66,7 @@ if [ "$rc" -ne 0 ]; then echo "expected exit 0 on the second stop, got $rc:"; ca
 echo "passed through on the second stop"
 git checkout -q -- .
 
-step "E1b: weakening a gate test blocks the per-edit check"
+step "E1b: weakening a gate test is flagged by the per-edit check (exit 2)"
 sed -i '' 's/assert ownership.owners == {"O-2": 0.5, "O-3": 0.5}/assert True/' tests/test_queries.py
 expect_block sh -c "echo '{\"tool_input\":{\"file_path\":\"$PWD/tests/test_queries.py\"}}' | python3 $CHECK --touched"
 git checkout -q -- .
