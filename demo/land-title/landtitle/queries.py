@@ -19,7 +19,7 @@ def owner_of(driver: Driver, tract_id: str) -> Ownership | None:
         WITH t, o.owner_id AS owner_id, sum(r.interest) AS interest
         WITH t, collect({owner_id: owner_id, interest: interest}) AS owners
         OPTIONAL MATCH (e:TitleEvent)-[:CHANGES]->(t)
-        WITH owners, e ORDER BY e.recorded DESC LIMIT 1
+        WITH owners, e ORDER BY e.recorded DESC, e.event_id DESC LIMIT 1
         RETURN owners, e.event_id AS as_of
         """,
         tract_id=tract_id,

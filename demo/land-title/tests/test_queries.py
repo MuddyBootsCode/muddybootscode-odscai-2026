@@ -43,3 +43,18 @@ def test_owner_of_sums_several_interests_held_by_one_owner(graph):
         assert queries.owner_of(graph, "T-105").owners == {"O-5": 1.25}
     finally:
         graph.execute_query("MATCH ()-[r:OWNED_BY {test_extra: true}]->() DELETE r")
+
+
+def test_owner_of_as_of_is_the_last_event_of_the_chain_on_a_same_day_tie(graph):
+    """Two events recorded the same day: owner_of and title_chain must agree on which is last."""
+    graph.execute_query(
+        "MATCH (t:Tract {tract_id: 'T-102'}) "
+        "CREATE (:TitleEvent {event_id: 'TE-006b', recorded: date('2016-08-12'), kind: 'correction', "
+        "instrument: 'Doc 2016-03312', test_extra: true})-[:CHANGES]->(t)"
+    )
+    try:
+        chain = queries.title_chain(graph, "T-102")
+        assert chain[-1].event_id == "TE-006b"
+        assert queries.owner_of(graph, "T-102").as_of == chain[-1].event_id
+    finally:
+        graph.execute_query("MATCH (e:TitleEvent {test_extra: true}) DETACH DELETE e")
