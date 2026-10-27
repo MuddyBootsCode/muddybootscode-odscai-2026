@@ -49,5 +49,6 @@ governs:
   - "tests/**"
 ```
 
-`tests/**` is in the list because the tests are the gates. That is what makes
-the Stop hook fire when someone weakens one.
+`tests/**` is in the list because the tests are the gates, and each gate line
+names its test file (`tests/test_queries.py:test_...`). The checker matches
+gate files by name, so that is what makes a weakened test block the edit.

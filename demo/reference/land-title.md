@@ -40,9 +40,9 @@ and the owners of the tracts under it on one page.
 
 ## Invariants
 
-- Ownership of a Tract is the traversal `Tract -[OWNED_BY]-> MineralOwner` as of the latest TitleEvent on that Tract. It is never stored as a property on a Well, a Lease, or a Tract. [gate: `landtitle/queries.py:owner_of`; `landtitle/model.py:Well`; `cypher/seed.cypher`; `test_owner_of_returns_current_interests_by_owner`]
-- A TitleEvent, once recorded, is never changed or deleted. [gate: constraint `title_event_id` in `cypher/constraints.cypher`; `test_title_event_append_only`]
-- The title chain of a Tract is ordered by recording date, and ownership answers as of the last event in that order. [gate: `landtitle/queries.py:title_chain`; `test_title_chain_is_ordered_by_recording_date`; `test_owner_of_reports_the_latest_title_event`]
+- Ownership of a Tract is the traversal `Tract -[OWNED_BY]-> MineralOwner` as of the latest TitleEvent on that Tract. It is never stored as a property on a Well, a Lease, or a Tract. [gate: `landtitle/queries.py:owner_of`; `landtitle/model.py:Well`; `cypher/seed.cypher`; `tests/test_queries.py:test_owner_of_returns_current_interests_by_owner`]
+- A TitleEvent is recorded once: its `event_id` is never written twice. [gate: constraint `title_event_id` in `cypher/constraints.cypher`; `tests/test_title_events.py:test_title_event_append_only`]
+- The title chain of a Tract is ordered by recording date, and ownership answers as of the last event in that order. [gate: `landtitle/queries.py:title_chain`; `tests/test_queries.py:test_title_chain_is_ordered_by_recording_date`; `tests/test_queries.py:test_owner_of_reports_the_latest_title_event`]
 - Every entity key is unique. [gate: the six constraints in `cypher/constraints.cypher`]
 - Every Well sits under at least one Lease.
 

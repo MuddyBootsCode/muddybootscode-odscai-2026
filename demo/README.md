@@ -35,7 +35,7 @@ shows a pane, empty is fine). The install line is in the top-level README.
    uv run pytest -q
    ```
 
-   Seven tests pass. Show `cypher/constraints.cypher`, `landtitle/queries.py`
+   Twelve tests pass. Show `cypher/constraints.cypher`, `landtitle/queries.py`
    and the `OWNED_BY` edge in `cypher/seed.cypher`. Point out that nothing says
    what the system is for, what "lease" means here, or what is out of scope.
 

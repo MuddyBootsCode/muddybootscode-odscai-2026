@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from neo4j import Driver, GraphDatabase
 
@@ -18,7 +19,16 @@ def connect() -> Driver:
     return driver
 
 
+def is_disposable(uri: str) -> bool:
+    """True only for a database on this machine. reset() refuses anything else."""
+    return urlsplit(uri).hostname in {"localhost", "127.0.0.1", "::1"}
+
+
 def reset(driver: Driver) -> None:
+    """Delete every node. Only for the local dev graph, which cypher/ rebuilds."""
+    uri = os.environ.get("LANDTITLE_NEO4J_URI", "bolt://localhost:7687")
+    if not is_disposable(uri):
+        raise RuntimeError(f"refusing to wipe {uri}: not a local database")
     driver.execute_query("MATCH (n) DETACH DELETE n")
 
 

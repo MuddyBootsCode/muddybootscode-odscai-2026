@@ -57,6 +57,11 @@ expect_block sh -c "echo '{}' | python3 $CHECK --changed --stop"
 echo '{"stop_hook_active": true}' | python3 $CHECK --changed --stop >/dev/null 2>&1 && echo "passed through on the second stop"
 git checkout -q -- .
 
+step "E1b: weakening a gate test blocks the per-edit check"
+sed -i '' 's/assert ownership.owners == {"O-2": 0.5, "O-3": 0.5}/assert True/' tests/test_queries.py
+expect_block sh -c "echo '{\"tool_input\":{\"file_path\":\"$PWD/tests/test_queries.py\"}}' | python3 $CHECK --touched"
+git checkout -q -- .
+
 step "OFFLINE 1: the new test is red on T-104"
 cat > tests/test_interests.py <<'EOF'
 from landtitle import queries
@@ -72,8 +77,9 @@ def unbalanced_tracts(driver: Driver, tolerance: float = 1e-9) -> list[tuple[str
     """Tracts whose current OWNED_BY interests do not sum to 1.0. Expected: none."""
     records, _, _ = driver.execute_query(
         """
-        MATCH (t:Tract)-[r:OWNED_BY]->(:MineralOwner)
-        WITH t.tract_id AS tract_id, round(sum(r.interest), 6) AS total
+        MATCH (t:Tract)
+        OPTIONAL MATCH (t)-[r:OWNED_BY]->(:MineralOwner)
+        WITH t.tract_id AS tract_id, round(coalesce(sum(r.interest), 0.0), 6) AS total
         WHERE abs(total - 1.0) > $tolerance
         RETURN tract_id, total ORDER BY tract_id
         """,
@@ -98,7 +104,7 @@ python3 - <<'PY'
 import pathlib
 p = pathlib.Path("ontology/land-title.md"); t = p.read_text()
 t = t.replace("- Every Well sits under at least one Lease.\n",
-  "- Every Well sits under at least one Lease.\n- The current OWNED_BY interests on a Tract sum to exactly 1.0. [gate: `landtitle/queries.py:unbalanced_tracts`; `test_current_interests_on_every_tract_sum_to_one`]\n")
+  "- Every Well sits under at least one Lease.\n- The current OWNED_BY interests on a Tract sum to exactly 1.0. [gate: `landtitle/queries.py:unbalanced_tracts`; `tests/test_interests.py:test_current_interests_on_every_tract_sum_to_one`]\n")
 t = t.replace("## Changelog\n\n", "## Changelog\n\n- 2026-10-27 — Added the interest-sum invariant after T-104 was found at 0.9.\n")
 p.write_text(t)
 PY

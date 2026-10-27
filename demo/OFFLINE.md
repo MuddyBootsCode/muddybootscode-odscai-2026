@@ -30,11 +30,12 @@ cat >> landtitle/queries.py <<'EOF'
 
 
 def unbalanced_tracts(driver: Driver, tolerance: float = 1e-9) -> list[tuple[str, float]]:
-    """Tracts whose current OWNED_BY interests do not sum to 1.0. Expected: none."""
+    """Tracts whose current OWNED_BY interests do not sum to 1.0, ownerless ones included."""
     records, _, _ = driver.execute_query(
         """
-        MATCH (t:Tract)-[r:OWNED_BY]->(:MineralOwner)
-        WITH t.tract_id AS tract_id, round(sum(r.interest), 6) AS total
+        MATCH (t:Tract)
+        OPTIONAL MATCH (t)-[r:OWNED_BY]->(:MineralOwner)
+        WITH t.tract_id AS tract_id, round(coalesce(sum(r.interest), 0.0), 6) AS total
         WHERE abs(total - 1.0) > $tolerance
         RETURN tract_id, total ORDER BY tract_id
         """,
@@ -62,7 +63,7 @@ sed -i '' "s/{interest: 0.3,  since: 'TE-007'}/{interest: 0.4,  since: 'TE-007'}
 uv run pytest -q
 ```
 
-`8 passed`.
+`13 passed`.
 
 ## 4. Commit. The gate says no.
 
@@ -90,7 +91,7 @@ not rule-neutral: it adds a rule. So the ontology moves in the same commit.
 Open `ontology/land-title.md`. Under `## Invariants` add:
 
 ```
-- The current OWNED_BY interests on a Tract sum to exactly 1.0. [gate: `landtitle/queries.py:unbalanced_tracts`; `test_current_interests_on_every_tract_sum_to_one`]
+- The current OWNED_BY interests on a Tract sum to exactly 1.0. [gate: `landtitle/queries.py:unbalanced_tracts`; `tests/test_interests.py:test_current_interests_on_every_tract_sum_to_one`]
 ```
 
 Under `## Changelog` add, at the top:
