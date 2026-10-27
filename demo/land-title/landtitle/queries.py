@@ -16,7 +16,8 @@ def owner_of(driver: Driver, tract_id: str) -> Ownership | None:
         """
         MATCH (t:Tract {tract_id: $tract_id})
         OPTIONAL MATCH (t)-[r:OWNED_BY]->(o:MineralOwner)
-        WITH t, collect({owner_id: o.owner_id, interest: r.interest}) AS owners
+        WITH t, o.owner_id AS owner_id, sum(r.interest) AS interest
+        WITH t, collect({owner_id: owner_id, interest: interest}) AS owners
         OPTIONAL MATCH (e:TitleEvent)-[:CHANGES]->(t)
         WITH owners, e ORDER BY e.recorded DESC LIMIT 1
         RETURN owners, e.event_id AS as_of

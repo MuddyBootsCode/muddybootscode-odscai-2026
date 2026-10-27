@@ -31,3 +31,15 @@ def test_title_chain_is_ordered_by_recording_date(graph):
     chain = queries.title_chain(graph, "T-102")
     assert all(isinstance(e, TitleEvent) for e in chain)
     assert [e.event_id for e in chain] == ["TE-002", "TE-006"]
+
+
+def test_owner_of_sums_several_interests_held_by_one_owner(graph):
+    """Two OWNED_BY edges from one tract to one owner are one holding, added up."""
+    graph.execute_query(
+        "MATCH (t:Tract {tract_id: 'T-105'}), (o:MineralOwner {owner_id: 'O-5'}) "
+        "CREATE (t)-[:OWNED_BY {interest: 0.25, since: 'TE-005', test_extra: true}]->(o)"
+    )
+    try:
+        assert queries.owner_of(graph, "T-105").owners == {"O-5": 1.25}
+    finally:
+        graph.execute_query("MATCH ()-[r:OWNED_BY {test_extra: true}]->() DELETE r")
