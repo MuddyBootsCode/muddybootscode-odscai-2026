@@ -7,7 +7,7 @@ says what should happen so you know when to move on.
 
 ```
 Set up the ontology for this repo with the ontology-driven-dev skill. Read the
-schema and code first, then interview me.
+schema and code first, then interview me, asking your questions one at a time.
 ```
 
 Expect: Phase 0 reports no ontology directory. Phase 1a drafts
