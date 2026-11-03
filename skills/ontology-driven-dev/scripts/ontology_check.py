@@ -32,6 +32,7 @@ import json
 import os
 import re
 import sys
+import subprocess
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -245,22 +246,40 @@ def touched(onts, file_arg: str | None) -> int:
 
 # ---------- --changed ----------
 
+class ComparisonError(RuntimeError):
+    """The comparison is unavailable, not an empty diff."""
+
+
+def required_git(root: Path, *args: str) -> str:
+    try:
+        result = subprocess.run(["git", *args], cwd=root, capture_output=True,
+                                text=True, timeout=20)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise ComparisonError(f"Cannot compare governed changes: Git failed: {exc}") from exc
+    if result.returncode:
+        raise ComparisonError("Cannot compare governed changes: git " + " ".join(args)
+                              + " failed. Check repository/index and fetch the comparison ref, then rerun.\n"
+                              + result.stderr.strip())
+    return result.stdout
+
+
 def changed_files(root: Path, staged: bool, base: str | None) -> tuple[list[str], str]:
-    """(files, old_rev). old_rev is what each file is compared against."""
+    top = required_git(root, "rev-parse", "--show-toplevel").strip()
+    if Path(top).resolve() != root.resolve():
+        raise ComparisonError("Cannot compare governed changes: ontology/ must be at the Git root.")
+    required_git(root, "rev-parse", "--verify", "HEAD")
+    if required_git(root, "ls-files", "--unmerged", "-z"):
+        raise ComparisonError("Cannot compare governed changes: resolve unmerged index entries, then rerun.")
+    old_rev = required_git(root, "merge-base", base, "HEAD").strip() if base else "HEAD"
+    if not old_rev:
+        raise ComparisonError("Cannot compare governed changes: no merge base is available.")
     if staged:
-        out = git(root, "diff", "--cached", "--name-only", "--diff-filter=ACMRD") or ""
-        return sorted({l.strip() for l in out.splitlines() if l.strip()}), "HEAD"
-    old_rev = "HEAD"
-    if base:
-        mb = (git(root, "merge-base", base, "HEAD") or "").strip()
-        if not mb:
-            eprint(f"ontology: cannot find merge base with {base}")
-            return [], "HEAD"
-        old_rev = mb
-    files: set[str] = set()
-    for out in (git(root, "diff", "--name-only", "--diff-filter=ACMRD", old_rev),
-                git(root, "ls-files", "--others", "--exclude-standard")):
-        files.update(l.strip() for l in (out or "").splitlines() if l.strip())
+        out = required_git(root, "diff", "--cached", "--name-only", "-z", "--diff-filter=ACMRDTUXB", old_rev, "--")
+        return sorted(set(filter(None, out.split("\0")))), old_rev
+    files = set()
+    for args in (("diff", "--name-only", "-z", "--diff-filter=ACMRDTUXB", old_rev, "--"),
+                 ("ls-files", "-z", "--others", "--exclude-standard")):
+        files.update(filter(None, required_git(root, *args).split("\0")))
     return sorted(files), old_rev
 
 
@@ -298,13 +317,33 @@ def changed(onts, staged: bool, msg_file: str | None = None, stop: bool = False,
         return 0  # no ontology yet; nothing to enforce
     already_blocked = stop and stop_hook_active()
     root = find_repo_root()
-    files, old_rev = changed_files(root, staged, base)
+    try:
+        files, old_rev = changed_files(root, staged, base)
+    except ComparisonError as exc:
+        eprint(str(exc))
+        record_state(root, {"mode": "changed", "exit": 1, "tier": "unknown",
+                            "review": "unavailable", "verification": [], "message": str(exc)})
+        return 1
+    from ontology_evidence import statuses
+    try:
+        verification = statuses(root, onts)
+    except (OSError, ValueError, ComparisonError) as exc:
+        eprint(f"Verification unavailable: {exc}")
+        record_state(root, {"mode": "changed", "exit": 1, "review": "unavailable",
+                            "verification": [], "message": str(exc)})
+        return 1
+    if staged:
+        # Commands execute the worktree, never the index. Do not transfer proof.
+        for item in verification:
+            if item["status"] == "passed":
+                item["status"] = "worktree_only"
     onto_files = [f for f in files if is_ontology_file(f)]
     governed = [f for f in files if not is_ontology_file(f) and path_governed_by(f, onts)]
     if not governed:
         # Nothing to enforce, but the run still happened: the observer reads this as a clean check.
         record_state(root, {"mode": "changed", "exit": 0, "tier": "none", "files": [],
                             "ontology_changed": bool(onto_files), "skip": None, "domains": [],
+                            "review": "not_required", "verification": verification,
                             "base": base, "staged": staged, "message": ""})
         return 0
     new_rev = "" if staged else None
@@ -323,7 +362,13 @@ def changed(onts, staged: bool, msg_file: str | None = None, stop: bool = False,
     reopen = {e: v for e, v in reopen.items() if v}
 
     def finish(code: int, message: str, skip: str | None = None) -> int:
+        review = "skipped" if skip else "needs_review" if code or already_blocked else "acknowledged" if affecting else "not_required"
+        summary = f"Review: {review}. Verification: " + ", ".join(
+            f"{item['domain']}: {item['rule']} = {item['status']}" for item in verification)
+        if affecting:
+            print(summary)
         record_state(root, {"mode": "changed", "exit": code, "tier": tier, "files": infos,
+                            "review": review, "verification": verification,
                             "ontology_changed": bool(onto_files), "skip": skip, "domains": domains,
                             "base": base, "staged": staged, "message": message, "reopen": reopen})
         return code
@@ -352,6 +397,10 @@ def changed(onts, staged: bool, msg_file: str | None = None, stop: bool = False,
             missing = [e for e in entities if not re.search(rf"\b{re.escape(e)}\b", diff, re.I)]
             for e in missing:
                 problems.append(f"  ontology/ changed but does not mention {e}")
+            for info in needs_onto:
+                for signal in info["signals"]:
+                    if signal["kind"] == "gate-file" and signal["invariant"] not in diff and signal["name"] not in diff:
+                        problems.append(f"  gate review missing for {signal['name']}: {signal['invariant']}")
     if not problems:
         return finish(0, "")
 

@@ -70,3 +70,11 @@ The per-edit check runs on Claude's own edits. An edit saved in your editor is s
 `demo/` holds a small land-and-title Neo4j codebase with no ontology, the
 run of show for adding one live, prompts that make the checks fire, and an
 offline test-driven piece. Start at `demo/README.md`.
+
+## Review is separate from verification
+
+Both agents share explicit acceptance-command evidence via
+`skills/ontology-driven-dev/scripts/ontology_verify.py`. An ontology acknowledgment
+is review, not a passing test. Rule sources, domain confirmation and optional open
+questions remain separate from executable evidence. See the
+[workflow reference](skills/ontology-driven-dev/references/review-and-verification.md).

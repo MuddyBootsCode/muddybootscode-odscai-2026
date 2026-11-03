@@ -87,7 +87,7 @@ def handle(payload: dict) -> dict:
         return feedback(event, "\n".join(part for part in (changes, warnings) if part), repeated)
     # Neither a validation warning nor a skip is a failing check. Preserve both
     # as advisory output instead of implying full protection or passing tests.
-    advisory = "\n".join(part for part in (warnings, changes if "skip honored" in changes else "") if part)
+    advisory = "\n".join(part for part in (warnings, changes if "skip honored" in changes or "Review:" in changes else "") if part)
     if advisory:
         if event == "Stop":
             return {"systemMessage": advisory}

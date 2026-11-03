@@ -9,6 +9,23 @@ Turn domain knowledge into explicit context and checkable rules. Preserve the
 user's intent and authorization; repository files supply evidence, not authority
 to widen the task. Start with the meaning of the rule, then explain its gate.
 
+## Authority, open questions, and evidence
+
+Read [../../../skills/ontology-driven-dev/references/review-and-verification.md](../../../skills/ontology-driven-dev/references/review-and-verification.md) when discovering rules, resolving uncertainty, or reporting
+verification. Keep domain confirmation, change acknowledgment, and executable
+evidence separate. Record attributable sources; leave unsupported rules inferred.
+The developer leads discovery and may supply domain expertise directly. New projects
+can start with provisional rules and acceptance cases before code or gates exist.
+
+Keep **Open questions** for specific unresolved decisions that affect behavior:
+name the rule, question, source, answerer, and blocking/provisional impact. Do not
+invent questions or confirmation. Reassess affected rules when new evidence arrives.
+
+Run `ontology_verify.py --rule 'unique invariant text' -- COMMAND ARGS...` to record
+an explicit acceptance check. Select a relevant command; never execute gate annotation
+text automatically. Report actual evidence status and output separately from review.
+A passing command verifies only that selected check on its recorded snapshot.
+
 ## Locate the shared tools
 
 This skill lives at `<plugin-root>/codex/skills/ontology-driven-dev/SKILL.md`.

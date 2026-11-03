@@ -11,7 +11,7 @@ Requires Git, Python 3.10+ available as `python3`, and a Codex release with
 plugins and lifecycle hooks. The CLI commands below were checked against
 Codex CLI 0.159.2. macOS/Linux are the initial target; Windows is unverified.
 
-From a shell, after this change is merged:
+From a shell, for the published release:
 
 ```bash
 codex plugin marketplace add MuddyBootsCode/muddybootscode-odscai-2026
@@ -104,3 +104,19 @@ and resources stay at `skills/ontology-driven-dev/` and ship in the same bundle.
 Sources checked October 25, 2026:
 [plugin packaging](https://developers.openai.com/plugins/build/plugins) and
 [Codex hooks](https://learn.chatgpt.com/docs/hooks).
+
+## Review and executable evidence
+
+The change checker now records `review` independently from per-rule `verification`.
+A relevant ontology acknowledgment does not mark a test passed. Record an explicit
+acceptance command with the shared `ontology_verify.py --rule 'unique rule text' --
+COMMAND ARGS...` runner. In Codex set `ONTOLOGY_STATE` to the absolute target
+`.codex/ontology-state.jsonl`; ignore it and `.codex/ontology-state.evidence/`.
+Evidence includes the command, exit status, output and source fingerprint. Changed
+source or tests invalidate it. CI must run its own acceptance tests; the review
+check's exit status alone does not enforce verification. See the shared
+[workflow reference](../skills/ontology-driven-dev/references/review-and-verification.md).
+
+Unavailable Git comparisons fail explicitly in the shared checker, including
+missing HEAD, invalid merge bases and failed enumeration. No clean verdict is
+available until the comparison works.
