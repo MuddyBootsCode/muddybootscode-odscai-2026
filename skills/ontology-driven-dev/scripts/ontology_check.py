@@ -327,6 +327,25 @@ def changed(onts, staged: bool, msg_file: str | None = None, stop: bool = False,
         return 0  # no ontology yet; nothing to enforce
     already_blocked = stop and stop_hook_active()
     root = find_repo_root()
+    notes: list[str] = []
+
+    def note(text: str, stream=eprint) -> None:
+        """Under --stop, collect for the host; otherwise say it now on the given stream."""
+        if stop:
+            notes.append(text)
+        else:
+            stream(text)
+
+    def emit(code: int) -> int:
+        """Under --stop with exit 0 only a JSON systemMessage reaches anyone, so stdout is that
+        and nothing else; a block (exit 2) hands stderr to Claude, so the notes go there."""
+        if stop and notes:
+            if code == 0:
+                print(json.dumps({"systemMessage": "\n".join(notes)}))
+            else:
+                for text in notes:
+                    eprint(text)
+        return code
     try:
         files, old_rev = changed_files(root, staged, base)
     except ComparisonError as exc:
@@ -364,8 +383,8 @@ def changed(onts, staged: bool, msg_file: str | None = None, stop: bool = False,
                             "base": base, "staged": staged, "message": ""})
         warning = evidence_warning(verification)
         if warning:
-            eprint(warning)
-        return 0
+            note(warning)
+        return emit(0)
     new_rev = "" if staged else None
     infos = [classify(root, f, onts, old_rev, new_rev) for f in governed]
     affecting_paths = {i["path"] for i in infos if i["tier"] == "affecting"}
@@ -386,15 +405,15 @@ def changed(onts, staged: bool, msg_file: str | None = None, stop: bool = False,
         summary = f"Review: {review}. Verification: " + ", ".join(
             f"{item['domain']}: {item['rule']} = {item['status']}" for item in verification)
         if affecting:
-            print(summary)
+            note(summary, print)
         record_state(root, {"mode": "changed", "exit": code, "tier": tier, "files": infos,
                             "review": review, "verification": verification,
                             "ontology_changed": bool(onto_files), "skip": skip, "domains": domains,
                             "base": base, "staged": staged, "message": message, "reopen": reopen})
         warning = evidence_warning(verification)
         if warning:
-            eprint(warning)
-        return code
+            note(warning)
+        return emit(code)
 
     if not affecting:
         return finish(0, "")
@@ -428,9 +447,9 @@ def changed(onts, staged: bool, msg_file: str | None = None, stop: bool = False,
         return finish(0, "")
 
     if already_blocked:
-        eprint("ontology: affecting changes still lack an ontology update after one block. "
-               "Tell the user which files and why, then stop. The commit-msg hook will still "
-               "require an update or `ontology-skip: <reason>`.")
+        note("ontology: affecting changes still lack an ontology update after one block. "
+             "Tell the user which files and why, then stop. The commit-msg hook will still "
+             "require an update or `ontology-skip: <reason>`.")
         return finish(0, "blocked once; passing through")
     head = "Governed paths changed in ways the ontology describes, and ontology/ did not follow:"
     eprint(head)

@@ -160,7 +160,7 @@ Never edit the hook to make it pass.
 
 ## When the hook warns about evidence
 
-The same check prints, without blocking:
+The same check warns, without blocking. At Stop the host shows it as a message to the user; on a commit it prints on stderr:
 
 ```
 Verification: Every Well has at least one Lease — stale. Rerun the acceptance check with ontology_verify.py before calling the rule verified.
