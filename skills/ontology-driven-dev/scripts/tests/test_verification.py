@@ -1,4 +1,5 @@
 """Real commands must supply evidence; documentation edits cannot create it."""
+import json
 import subprocess
 import sys
 from test_ontology_check import Repo, check, state, git, SCRIPTS
@@ -126,3 +127,99 @@ class Verification(Repo):
         self.assertNotEqual(result.returncode, 0)
         time.sleep(.6)
         self.assertFalse((self.root / 'late-side-effect').exists())
+
+
+class StopWarnsOnEvidence(Repo):
+    """The Stop hook says when recorded evidence is bad, even with a clean diff.
+    With exit 0 Claude Code shows nothing from stderr, so the warning is a JSON
+    systemMessage on stdout, which the host draws for the user."""
+
+    def verify(self, code):
+        return subprocess.run([sys.executable, str(SCRIPTS / 'ontology_verify.py'),
+                               '--rule', 'An Order is larger', '--', sys.executable, '-c', code],
+                              cwd=self.root, capture_output=True, text=True)
+
+    def stop(self):
+        r = check(self.root, '--changed', '--stop')
+        self.assertEqual(r.returncode, 0, r.stderr)  # advisory, never a block
+        return r
+
+    def message(self, r):
+        return json.loads(r.stdout)['systemMessage']  # stdout is one JSON object and nothing else
+
+    def test_failed_evidence_warns_at_stop_with_a_clean_diff(self):
+        self.assertNotEqual(self.verify("raise AssertionError('bad order')").returncode, 0)
+        message = self.message(self.stop())
+        self.assertIn('An Order is larger', message)
+        self.assertIn('failed', message)
+
+    def test_stale_evidence_warns_after_an_edit_anywhere(self):
+        self.assertEqual(self.verify('print(1)').returncode, 0)
+        self.write('README.md', 'changed\n')
+        message = self.message(self.stop())
+        self.assertIn('An Order is larger', message)
+        self.assertIn('stale', message)
+
+    def test_passing_evidence_is_quiet(self):
+        self.assertEqual(self.verify('print(1)').returncode, 0)
+        r = self.stop()
+        self.assertEqual(r.stdout.strip(), '')
+        self.assertNotIn('Verification', r.stderr)
+
+    def test_review_summary_and_warning_share_one_message_on_an_acknowledged_change(self):
+        self.assertEqual(self.verify('print(1)').returncode, 0)
+        self.edit('src/types.ts', 'price: number', 'price: string')
+        self.edit('mcp/schema.py', 'One item.', 'One item line.')
+        self.edit('ontology/orders.md', 'Initial.', 'Item representation reviewed.')
+        message = self.message(self.stop())
+        self.assertIn('Review: acknowledged', message)
+        self.assertIn('stale', message)
+
+    def test_without_stop_the_warning_is_plain_text_on_stderr(self):
+        self.assertNotEqual(self.verify("raise AssertionError('bad order')").returncode, 0)
+        r = check(self.root, '--changed')
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout.strip(), '')
+        self.assertIn('failed', r.stderr)
+
+    def test_a_block_still_speaks_through_stderr_and_exit_2(self):
+        self.edit('src/types.ts', 'price: number', 'price: string')
+        self.edit('mcp/schema.py', 'One item.', 'One item line.')
+        r = check(self.root, '--changed', '--stop')
+        self.assertEqual(r.returncode, 2)
+        self.assertIn('Item', r.stderr)
+        self.assertEqual(r.stdout.strip(), '')
+
+
+class EvidenceUnavailableDoesNotBlock(Repo):
+    """A fingerprint the runner cannot take makes evidence unavailable; it never fails review."""
+
+    def setUp(self):
+        super().setUp()
+        run = subprocess.run([sys.executable, str(SCRIPTS / 'ontology_verify.py'),
+                              '--rule', 'An Order is larger', '--', sys.executable, '-c', 'print(1)'],
+                             cwd=self.root, capture_output=True, text=True)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        (self.root / 'docs-link').symlink_to('README.md')  # unrelated, untracked
+
+    def test_unrelated_commit_is_not_blocked(self):
+        r = check(self.root, '--changed', '--staged')
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn('unavailable', r.stderr)
+        rec = state(self.root)[-1]
+        self.assertEqual(rec['review'], 'not_required')
+        self.assertEqual(rec['verification'][0]['status'], 'unavailable')
+
+    def test_acknowledged_change_still_passes_review(self):
+        self.edit('src/types.ts', 'price: number', 'price: string')
+        self.edit('mcp/schema.py', 'One item.', 'One item line.')
+        self.edit('ontology/orders.md', 'Initial.', 'Item representation reviewed.')
+        r = check(self.root, '--changed')
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(state(self.root)[-1]['review'], 'acknowledged')
+
+    def test_skip_marker_still_works(self):
+        self.edit('src/types.ts', 'price: number', 'price: string')
+        self.edit('mcp/schema.py', 'One item.', 'One item line.')
+        r = check(self.root, '--changed', env={'ONTOLOGY_SKIP': 'rename only'})
+        self.assertEqual(r.returncode, 0, r.stderr)

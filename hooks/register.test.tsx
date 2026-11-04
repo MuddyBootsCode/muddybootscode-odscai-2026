@@ -83,7 +83,9 @@ Dates
 
 const DIFF = '--- ItemRecord\n+++ ItemRecord\n@@ -2,3 +2,4 @@\n   id: string;\n   price: number;\n+  weight: number;\n }'
 
-function engine(on: Parameters<Body>[1], status: string[], file: { text: string | null }, ontology: string | null = null, submitted: string[] = []) {
+const INSTALLED = '/repo/.claude/skills/ontology-driven-dev/scripts'
+
+function engine(on: Parameters<Body>[1], status: string[], file: { text: string | null }, ontology: string | null = null, submitted: string[] = [], logs: Record<string, string> = {}, scripts: string = INSTALLED) {
   mock.store(on)
   on('prompt.submit', (_, e) => {
     submitted.push(e.text)
@@ -97,6 +99,7 @@ function engine(on: Parameters<Body>[1], status: string[], file: { text: string 
   })
   on('session.root', () => ({ value: '/repo' }))
   on('fs.exists', (_, e) => {
+    if (e.path.endsWith('/ontology_verify.py')) return { value: e.path === `${scripts}/ontology_verify.py` }
     expect(e.path).toBe('/repo/.claude/ontology-state.jsonl')
     return { value: file.text !== null }
   })
@@ -108,6 +111,11 @@ function engine(on: Parameters<Body>[1], status: string[], file: { text: string 
     ] }
   })
   on('fs.read', (_, e) => {
+    if (e.path.endsWith('.log')) {
+      const log = logs[e.path]
+      if (log === undefined) throw new Error('ENOENT')
+      return { value: log }
+    }
     if (e.path.endsWith('.md')) {
       if (ontology === null || e.path.endsWith('README.md')) throw new Error('ENOENT')
       return { value: ontology }
@@ -402,38 +410,6 @@ test('every rule is on the pane, grouped as the file groups them, unfolding on r
   await ui.unmount()
 })
 
-test('a change reruns the tests of the rules it touches: pass is CLEAN, fail is ERROR with the output, unrun is WARNING', async ($, on) => {
-  const status: string[] = []
-  const rec = { ts: '2026-10-24T11:40:00-0500', mode: 'changed', exit: 2, staged: true, files: [], domains: ['demo'],
-    changed_functions: { 'src/fit.ts': ['findItemsLargerThanOrder'] },
-    rules: [
-      { id: 'an-order-is-larger', text: 'An Order is larger than any Item in it.', domain: 'demo', status: 'fail',
-        tests: ['orderItemFit.test.ts'], hit: [{ file: 'src/fit.ts', name: 'findItemsLargerThanOrder' }],
-        runs: [{ test: 'orderItemFit.test.ts', status: 'fail', output: 'AssertionError: expected [] to have length 1' }] },
-      { id: 'every-item-has-a-price', text: 'Every Item has a price.', domain: 'demo', status: 'pass',
-        tests: ['itemPrice.test.ts'], hit: [{ file: 'src/fit.ts', name: 'findItemsLargerThanOrder' }],
-        runs: [{ test: 'itemPrice.test.ts', status: 'pass' }] },
-      { id: 'an-order-has-a-date', text: 'An Order has a date.', domain: 'demo', status: 'unrun',
-        tests: ['orderDate.test.ts'], hit: [{ file: 'src/fit.ts', name: 'findItemsLargerThanOrder' }], runs: [] },
-    ],
-    message: "A rule's test fails after this change: An Order is larger than any Item in it." }
-  engine(on, status, { text: JSON.stringify(rec) + '\n' }, ONTOLOGY)
-  await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
-  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
-  // the failing rule is an ERROR issue: the sentence, the test, the function that linked it, and the test's output
-  expect((await ui.find({ type: 'Text', text: /fails after this change/ }))?.text).toMatch(/An Order is larger than any Item in it/)
-  expect((await ui.find({ type: 'Text', text: /AssertionError: expected \[\] to have length 1/ }))).toBeDefined()
-  expect((await ui.find({ type: 'Text', text: /orderItemFit\.test\.ts.*findItemsLargerThanOrder/ }))).toBeDefined()
-  expect(await ui.find({ type: 'Button', text: /^Fix it$/ })).toBeDefined()
-  // the rule whose test did not run is a WARNING
-  expect((await ui.find({ type: 'Text', text: /did not run/ }))?.text).toMatch(/An Order has a date/)
-  // the rule whose test passed is CLEAN: a tick line under a header that counts
-  expect((await ui.find({ type: 'Text', text: /^RULES RUN/ }))).toBeDefined()
-  expect((await ui.find({ type: 'Text', text: /1 of 3 pass/ }))).toBeDefined()
-  expect((await ui.find({ type: 'Text', text: /^✓ Every Item has a price/ }))).toBeDefined()
-  await ui.unmount()
-})
-
 test('an edit to a rule\'s gate file is an issue box naming the rule, with fix, explore and leave', async ($, on) => {
   const status: string[] = []
   const submitted: string[] = []
@@ -498,4 +474,202 @@ test('a rule gated by another function of the changed file says which function c
   expect(await ui.find({ type: 'Text', text: /fit\.ts › findItemsLargerThanOrder, line 75 changed/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /findItemsLargerThanOrder changed, not priceOf, which this rule's gate names\. Check whether priceOf calls it\./ })).toBeDefined()
   await ui.unmount()
+})
+
+test('the end-of-turn check carries each rule\'s acceptance evidence: failed is ERROR with the output, unavailable is WARNING, the rest are rows', async ($, on) => {
+  const status: string[] = []
+  const submitted: string[] = []
+  const rec = { ts: '2026-11-04T11:40:00-0500', mode: 'changed', exit: 0, tier: 'none', files: [], domains: [],
+    ontology_changed: false, skip: null, base: null, staged: false, message: '', review: 'not_required',
+    verification: [
+      { domain: 'demo', rule: 'An Order is larger than any Item in it.', status: 'failed', command: ['python3', '-m', 'pytest', 'tests/test_fit.py', '-q'], exit: 1, output: '/repo/.claude/ontology-state.evidence/1.log' },
+      { domain: 'demo', rule: 'Every Item has a price.', status: 'passed', command: ['python3', '-m', 'pytest', 'tests/test_price.py', '-q'], exit: 0, output: '/repo/.claude/ontology-state.evidence/2.log' },
+      { domain: 'demo', rule: 'An Order has a date.', status: 'stale', command: ['python3', '-m', 'pytest', 'tests/test_date.py', '-q'], exit: 0, output: '/repo/.claude/ontology-state.evidence/3.log' },
+      { domain: 'demo', rule: "A Item's `weight` is positive.", status: 'not_run' },
+      { domain: 'demo', rule: 'Start is before end.', status: 'unavailable', command: ['/missing/command'], exit: null, output: '/repo/.claude/ontology-state.evidence/5.log' },
+    ] }
+  const logs = { '/repo/.claude/ontology-state.evidence/1.log': 'FAILED tests/test_fit.py::test_order_larger - AssertionError: expected [] to have length 1\n1 failed in 0.1s\n' }
+  engine(on, status, { text: JSON.stringify(rec) + '\n' }, ONTOLOGY, submitted, logs)
+  on('turn.complete', (_, e) => ({ text: e.answer }))
+  await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
+
+  for (const surface of ['terminal', 'desktop'] as const) {
+    const ui = await $.ui.mount({ ...PANE, surface })
+    // the failed check is an ERROR issue: the rule, the command that ran, and the output it left
+    expect((await ui.find({ type: 'Text', text: /acceptance check fails/ }))?.text).toMatch(/An Order is larger than any Item in it/)
+    expect(await ui.find({ type: 'Text', text: /^ERROR$/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /python3 -m pytest tests\/test_fit\.py -q/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /AssertionError: expected \[\] to have length 1/ })).toBeDefined()
+    // a check that could not run is a WARNING, not a pass
+    expect((await ui.find({ type: 'Text', text: /could not run/ }))?.text).toMatch(/Start is before end/)
+    // stale and not-run rules are rows under VERIFIED, not issue boxes
+    expect(await ui.find({ type: 'Text', text: /acceptance check.*An Order has a date/ })).toBeUndefined()
+    expect(await ui.find({ type: 'Text', text: /^VERIFIED/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /1 of 5 passed: 1 failed, 1 stale, 1 not run, 1 could not run/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /^✓ Every Item has a price/ })).toBeDefined()
+    expect((await ui.find({ type: 'Text', text: /^▲ An Order has a date/ }))?.text).toMatch(/stale/)
+    expect((await ui.find({ type: 'Text', text: /^· A Item's weight is positive/ }))?.text).toMatch(/not run/)
+    // the status line still reports the review gate, not the evidence
+    expect(status.at(-1)).toMatch(/ontology: passed/)
+    await ui.unmount()
+  }
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  // Fix it on the failed check: the rule, the output, and the exact command to rerun
+  const fix = await ui.find({ type: 'Button', text: /Fix it/ })
+  await $.ui.press({ plugin: 'ontology-observer', key: fix!.key!, requestId: 'ontology', surface: 'desktop' })
+  const fixText = submitted.at(-1) ?? ''
+  expect(fixText).toMatch(/An Order is larger than any Item in it\./)
+  expect(fixText).toMatch(/AssertionError: expected \[\] to have length 1/)
+  expect(fixText).toMatch(/python3 \.claude\/skills\/ontology-driven-dev\/scripts\/ontology_verify\.py --rule 'An Order is larger than any Item in it\.' -- python3 -m pytest tests\/test_fit\.py -q/)
+  await $.turn.complete({ reason: 'answer', answer: 'done', durationMs: 1, isAborted: false, turnId: 't1' })
+
+  // Verify on a stale row reruns the command it recorded
+  const stale = await ui.find({ type: 'Button', text: /Verify An Order has a date/ })
+  await $.ui.press({ plugin: 'ontology-observer', key: stale!.key!, requestId: 'ontology', surface: 'desktop' })
+  expect(submitted.at(-1)).toMatch(/python3 \.claude\/skills\/ontology-driven-dev\/scripts\/ontology_verify\.py --rule 'An Order has a date\.' -- python3 -m pytest tests\/test_date\.py -q/)
+  await $.turn.complete({ reason: 'answer', answer: 'done', durationMs: 1, isAborted: false, turnId: 't2' })
+
+  // Verify on a never-run rule asks for a command to be chosen, naming the rule and that it has no gate
+  const fresh = await ui.find({ type: 'Button', text: /Verify A Item's weight is positive/ })
+  await $.ui.press({ plugin: 'ontology-observer', key: fresh!.key!, requestId: 'ontology', surface: 'desktop' })
+  const freshText = submitted.at(-1) ?? ''
+  expect(freshText).toMatch(/A Item's weight is positive\./)
+  expect(freshText).toMatch(/no gate/)
+  // an apostrophe and backticks in the rule survive the shell: single quotes, the apostrophe spliced in
+  expect(freshText).toContain("ontology_verify.py --rule 'A Item'\\''s `weight` is positive.' -- <command>")
+  // a passed row has nothing to press
+  expect(await ui.find({ type: 'Button', text: /Verify Every Item has a price/ })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('a record without verification draws no VERIFIED section', async ($, on) => {
+  const status: string[] = []
+  engine(on, status, { text: TEXT }, ONTOLOGY)
+  await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect(await ui.find({ type: 'Text', text: /^VERIFIED/ })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: /acceptance check/ })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('verify prompts quote every argument for the shell and name the runner where it is installed', async ($, on) => {
+  const status: string[] = []
+  const submitted: string[] = []
+  const rec = { ts: '2026-11-04T12:00:00-0500', mode: 'changed', exit: 0, tier: 'none', files: [], domains: [],
+    ontology_changed: false, skip: null, base: null, staged: false, message: '', review: 'not_required',
+    verification: [
+      { domain: 'demo', rule: 'An Order has a date.', status: 'stale', command: ['python3', '-c', 'assert 1 == 1', '--name', 'a$b'], exit: 0, output: '/repo/.claude/ontology-state.evidence/3.log' },
+    ] }
+  engine(on, status, { text: JSON.stringify(rec) + '\n' }, ONTOLOGY, submitted, {}, '/repo/ontology/scripts')
+  on('turn.complete', (_, e) => ({ text: e.answer }))
+  await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  const stale = await ui.find({ type: 'Button', text: /Verify An Order has a date/ })
+  await $.ui.press({ plugin: 'ontology-observer', key: stale!.key!, requestId: 'ontology', surface: 'desktop' })
+  const text = submitted.at(-1) ?? ''
+  // the tracked copy wins when it exists; a multiword argument and a $ keep their boundaries and meaning
+  expect(text).toContain("python3 ontology/scripts/ontology_verify.py --rule 'An Order has a date.' -- python3 -c 'assert 1 == 1' --name 'a$b'")
+  await ui.unmount()
+})
+
+test('without the runner anywhere the prompt says so instead of naming a missing file', async ($, on) => {
+  const status: string[] = []
+  const submitted: string[] = []
+  const rec = { ts: '2026-11-04T12:00:00-0500', mode: 'changed', exit: 0, tier: 'none', files: [], domains: [],
+    ontology_changed: false, skip: null, base: null, staged: false, message: '', review: 'not_required',
+    verification: [{ domain: 'demo', rule: 'An Order has a date.', status: 'not_run' }] }
+  engine(on, status, { text: JSON.stringify(rec) + '\n' }, ONTOLOGY, submitted, {}, '/nowhere')
+  on('turn.complete', (_, e) => ({ text: e.answer }))
+  await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  const b = await ui.find({ type: 'Button', text: /Verify An Order has a date/ })
+  await $.ui.press({ plugin: 'ontology-observer', key: b!.key!, requestId: 'ontology', surface: 'desktop' })
+  const text = submitted.at(-1) ?? ''
+  expect(text).toMatch(/ontology_verify\.py is not installed in this repo/)
+  expect(text).toMatch(/install\.sh/)
+  expect(text).not.toMatch(/python3 \S*ontology_verify\.py/)
+  await ui.unmount()
+})
+
+test('an edit after the last end-of-turn check turns its passes stale until the next check', async ($, on) => {
+  const status: string[] = []
+  const file = { text: '' }
+  const passed = { ts: '2026-11-04T13:00:00-0500', mode: 'changed', exit: 0, tier: 'none', files: [], domains: [],
+    ontology_changed: false, skip: null, base: null, staged: false, message: '', review: 'not_required',
+    verification: [{ domain: 'demo', rule: 'Every Item has a price.', status: 'passed', command: ['pytest', 'tests/test_price.py', '-q'], exit: 0, output: '/repo/.claude/ontology-state.evidence/2.log' }] }
+  engine(on, status, file, ONTOLOGY)
+  await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
+
+  file.text = JSON.stringify(passed) + '\n'
+  await $.classic.Stop({ stop_hook_active: false })
+  const before = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect(await before.find({ type: 'Text', text: /^✓ Every Item has a price/ })).toBeDefined()
+  expect(await before.find({ type: 'Button', text: /Verify Every Item has a price/ })).toBeUndefined()
+  await before.unmount()
+
+  // an edit outside every governed path: the per-edit check writes no record, but the
+  // fingerprint changed all the same, so the pass is stale
+  await $.classic.PostToolUse({ tool_name: 'Edit', tool_input: { file_path: 'README.md' }, tool_response: {}, tool_use_id: 't1' })
+  const after = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect(await after.find({ type: 'Text', text: /^✓ Every Item has a price/ })).toBeUndefined()
+  expect((await after.find({ type: 'Text', text: /^▲ Every Item has a price/ }))?.text).toMatch(/stale/)
+  expect(await after.find({ type: 'Text', text: /0 of 1 passed: 1 stale/ })).toBeDefined()
+  expect(await after.find({ type: 'Button', text: /Verify Every Item has a price/ })).toBeDefined()
+  await after.unmount()
+
+  // the next end-of-turn check is the word on it again
+  file.text += JSON.stringify({ ...passed, ts: '2026-11-04T13:02:00-0500' }) + '\n'
+  await $.classic.Stop({ stop_hook_active: false })
+  const again = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect(await again.find({ type: 'Text', text: /^✓ Every Item has a price/ })).toBeDefined()
+  await again.unmount()
+
+  // a governed edit, which does leave a record, is stale the same way
+  file.text += JSON.stringify({ ts: '2026-11-04T13:03:00-0500', mode: 'touched', exit: 0, tier: 'touched',
+    files: [{ path: 'src/utils.ts', tier: 'touched', signals: [], domains: ['demo'] }], domains: ['demo'], message: '' }) + '\n'
+  await $.classic.PostToolUse({ tool_name: 'Write', tool_input: { file_path: 'src/utils.ts' }, tool_response: {}, tool_use_id: 't2' })
+  const governed = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect((await governed.find({ type: 'Text', text: /^▲ Every Item has a price/ }))?.text).toMatch(/stale/)
+  await governed.unmount()
+
+  // a tool that edits nothing changes nothing
+  file.text += JSON.stringify({ ...passed, ts: '2026-11-04T13:04:00-0500' }) + '\n'
+  await $.classic.Stop({ stop_hook_active: false })
+  await $.classic.PostToolUse({ tool_name: 'Read', tool_input: { file_path: 'README.md' }, tool_response: {}, tool_use_id: 't3' })
+  const read = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect(await read.find({ type: 'Text', text: /^✓ Every Item has a price/ })).toBeDefined()
+  await read.unmount()
+})
+
+test('a shell command counts as an edit, and the mark survives history truncation', async ($, on) => {
+  const status: string[] = []
+  const file = { text: '' }
+  const passed = (ts: string) => ({ ts, mode: 'changed', exit: 0, tier: 'none', files: [], domains: [],
+    ontology_changed: false, skip: null, base: null, staged: false, message: '', review: 'not_required',
+    verification: [{ domain: 'demo', rule: 'Every Item has a price.', status: 'passed', command: ['pytest', '-q'], exit: 0, output: '/repo/.claude/ontology-state.evidence/2.log' }] })
+  engine(on, status, file, ONTOLOGY)
+  await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
+
+  // more checks than the pane keeps, so the window is full before the edit
+  const many: string[] = []
+  for (let i = 0; i < 501; i++) many.push(JSON.stringify(passed(`2026-11-04T10:${String(Math.floor(i / 60)).padStart(2, '0')}:${String(i % 60).padStart(2, '0')}-0500`)))
+  file.text = many.join('\n') + '\n'
+  await $.classic.Stop({ stop_hook_active: false })
+  const before = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect(await before.find({ type: 'Text', text: /^✓ Every Item has a price/ })).toBeDefined()
+  await before.unmount()
+
+  // a shell command can change any file: the pass is stale until a check looks again
+  await $.classic.PostToolUse({ tool_name: 'Bash', tool_input: { command: 'sed -i s/a/b/ src/x.ts' }, tool_response: {}, tool_use_id: 't1' })
+  const after = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect((await after.find({ type: 'Text', text: /^▲ Every Item has a price/ }))?.text).toMatch(/stale/)
+  await after.unmount()
+
+  // the next check displaces an old record instead of growing the window; it still counts as new
+  file.text += JSON.stringify(passed('2026-11-04T14:00:00-0500')) + '\n'
+  await $.classic.Stop({ stop_hook_active: false })
+  const again = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect(await again.find({ type: 'Text', text: /^✓ Every Item has a price/ })).toBeDefined()
+  await again.unmount()
 })

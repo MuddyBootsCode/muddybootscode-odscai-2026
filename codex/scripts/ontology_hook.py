@@ -94,8 +94,15 @@ def handle(payload: dict) -> dict:
     # Neither a validation warning nor a skip is a failing check. Preserve both
     # as advisory output instead of implying full protection or passing tests.
     advisory = "\n".join(part for part in (warnings, changes if "skip honored" in changes or "Review:" in changes else "") if part)
-    evidence = statuses(root, load_all(root))
-    problems = [item for item in evidence if item["status"] in {"failed", "unavailable", "interrupted", "stale"}]
+    onts = load_all(root)
+    try:
+        evidence = statuses(root, onts)
+    except (OSError, ValueError) as exc:
+        # The evidence cannot be fingerprinted (a symlink, a submodule, an unreadable log):
+        # every rule's evidence is unavailable. The review verdict above stands on its own.
+        evidence = [{"domain": o["domain"], "rule": r["text"], "status": f"unavailable ({exc})"}
+                    for o in onts for r in o["invariants"]]
+    problems = [item for item in evidence if item["status"].split(" ")[0] in {"failed", "unavailable", "interrupted", "stale"}]
     if problems:
         advisory = "\n".join(filter(None, [advisory, "Verification: " + "; ".join(
             f"{item['rule']} — {item['status']}" for item in problems)]))

@@ -8,24 +8,7 @@ compatibility: Claude Code (hooks), any agent that can run Python 3 scripts. Git
 
 The model doesn't need to remember the past. It needs to know where it is.
 
-This skill gives a repo a written ontology — entities, relationships, invariants, vocabulary, intent, scope — that the model reads before it writes code, can query mid-task, and receives change-review feedback when governed definitions move. It is the method behind "give the model an ontology of the problem, not a memory of the past."
-
-## Authority, open questions, and evidence
-
-Read [references/review-and-verification.md](references/review-and-verification.md) when discovering rules, resolving uncertainty, or reporting
-verification. Keep domain confirmation, change acknowledgment, and executable
-evidence separate. Record attributable sources; leave unsupported rules inferred.
-The developer leads discovery and may supply domain expertise directly. New projects
-can start with provisional rules and acceptance cases before code or gates exist.
-
-Keep **Open questions** for specific unresolved decisions that affect behavior:
-name the rule, question, source, answerer, and blocking/provisional impact. Do not
-invent questions or confirmation. Reassess affected rules when new evidence arrives.
-
-Run `ontology_verify.py --rule 'unique invariant text' -- COMMAND ARGS...` to record
-an explicit acceptance check. Select a relevant command; never execute gate annotation
-text automatically. Report actual evidence status and output separately from review.
-A passing command verifies only that selected check on its recorded snapshot.
+This skill gives a repo a written ontology — entities, relationships, invariants, vocabulary, intent, scope — that the model reads before it writes code, can query mid-task, and cannot drift away from without a hook saying so. Three facts about a rule stay separate all the way through: whether the domain confirmed it, whether a change to its code was reviewed, and whether its test ran and passed on the code as it stands now. It is the method behind "give the model an ontology of the problem, not a memory of the past."
 
 ## Layout this skill expects
 
@@ -36,7 +19,9 @@ A passing command verifies only that selected check on its recorded snapshot.
 │   └── <domain>.md               # one per domain (see assets/ONTOLOGY.template.md)
 ├── .claude/
 │   ├── settings.json             # hooks (see assets/hooks.settings.json)
-│   └── skills/ontology-driven-dev/   # this skill, copied into the repo
+│   ├── skills/ontology-driven-dev/   # this skill, copied into the repo
+│   ├── ontology-state.jsonl      # what each check saw (gitignored by install.sh)
+│   └── ontology-state.evidence/  # each rule's last acceptance run: command, exit, output (gitignored)
 └── .git/hooks/pre-commit         # optional git-side gate
 ```
 
@@ -45,8 +30,10 @@ If the repo gitignores `.claude/` (common; often only `.claude/hooks/` is tracke
 Scripts in `scripts/`:
 
 - `ontology_query.py` — the model's query surface. `summary`, `entity <Name>`, `term <word>`, `invariants`, `scope`, `section <Heading>`.
-- `ontology_check.py` — the enforcer. `--validate` (structure), `--touched` (PostToolUse: did this edit hit a governed path?), `--changed` (Stop / pre-commit: governed files changed but ontology didn't → block).
-- `install.sh` — copies hooks into `.claude/settings.json` and installs the git pre-commit hook.
+- `ontology_check.py` — the enforcer. `--validate` (structure), `--touched` (PostToolUse: did this edit hit a governed path?), `--changed` (Stop / pre-commit: governed files changed but ontology didn't → block). It also reports each rule's evidence state and warns when one is failed or stale.
+- `ontology_verify.py` — the acceptance runner. `--rule "<text>" -- <command>` runs the command you chose for one rule and records the result, the output and a fingerprint of the repo. It never runs the text of a gate annotation.
+- `ontology_evidence.py` — reads those records back; the checker and the pane use it. Not run by hand.
+- `install.sh` — copies hooks into `.claude/settings.json`, installs the git hooks, and gitignores the state file and the evidence folder.
 
 ## Phase 0 — Figure out where the repo is
 
@@ -92,6 +79,8 @@ The code shows what exists; it doesn't show what the system is *for* or what a w
 
 Keep each answer to a line or two in the file. An ontology the model can read in thirty seconds is worth more than a complete one it skims.
 
+Say where each rule came from. A rule read from code stays `(inferred)` until someone who knows the domain confirms it; then it gets `[confirmed: name YYYY-MM-DD]`. Code shows what the system does, not whether that is right, and a gate does not make a rule true. A rule two sources disagree on goes under **Disagreements** with both claims. A decision the user cannot make now goes under **Open questions**: the rule, the question, who can answer, and what the code does meanwhile. Only real decisions that change behavior belong there; don't invent questions, and when one is answered move the answer to the Changelog.
+
 ### 1c. Governed paths
 
 In the file's front matter, list the globs the ontology governs — the paths whose change should also change the ontology:
@@ -113,7 +102,7 @@ python3 scripts/ontology_check.py --validate
 bash scripts/install.sh
 ```
 
-`install.sh` merges the hooks into `.claude/settings.json` (it won't clobber existing hooks) and appends to `.git/hooks/pre-commit` (validate) and `.git/hooks/commit-msg` (change gate). Tell the user what was installed and that the hooks can be removed by deleting those entries.
+`install.sh` merges the hooks into `.claude/settings.json` (it won't clobber existing hooks), appends to `.git/hooks/pre-commit` (validate) and `.git/hooks/commit-msg` (change gate), and gitignores `.claude/ontology-state.jsonl` and `.claude/ontology-state.evidence/`, which hold raw command output. Tell the user what was installed and that the hooks can be removed by deleting those entries.
 
 ## Phase 2 — Derive the gates
 
@@ -130,6 +119,14 @@ Record each gate in the ontology under the invariant it protects:
 - Every Well has at least one Lease. [gate: migration 0042 `well_leases` PK (api_number, lease_id) + FKs; test_well_has_lease]
 ```
 
+Then run the gate once through the runner, from the repo root, so the rule has evidence and not just a note:
+
+```bash
+python3 scripts/ontology_verify.py --rule "Every Well has at least one Lease" -- pytest tests/test_well_has_lease.py -q
+```
+
+`--rule` is a substring that must match exactly one invariant (`--domain` narrows it). The runner runs the command you chose, never the text after `[gate:`, and saves the exit code, the output, and a fingerprint of every tracked file. The pane and the `--changed` check then show the rule as `passed` until any file changes, when it turns `stale`. Make it fail first: break the rule on purpose, watch the run record `failed`, repair it, run it again. A check that never failed proves nothing, and `-- true` or an unrelated green test is not evidence.
+
 An invariant with no gate is a wish. Say so to the user and offer to write the gate.
 
 ## Phase 3 — Working inside the ontology (the daily loop)
@@ -138,9 +135,10 @@ This is the part that runs on every task once the ontology exists.
 
 1. **Read first.** Before touching any file, run `python3 scripts/ontology_query.py summary`. If the task names an entity or a term, run `entity <Name>` or `term <word>` as well. The SessionStart hook prints the summary automatically, but query again for the specific thing you're about to change.
 2. **Check scope.** If the task touches anything in **Out of scope**, stop and say so. Don't widen the system without the user saying it's in scope now — and if they do, the ontology changes first, then the code.
-3. **Work from a ticket, not a conversation.** If the task doesn't already name an invariant it protects, an acceptance check, and an out-of-scope line, write those three lines before starting. "Done" means the acceptance check passes, not that the diff looks right.
-4. **Change the ontology in the same commit as the schema.** If you add an entity, relationship, or rule to the code, add it to `ontology/<domain>.md` in the same change. The `--changed` hook will block a Stop or a commit where governed paths changed and the ontology didn't. That's deliberate: a stale ontology is worse than none, because the model trusts it.
-5. **When a gate misses, the ontology is thin.** If a bug gets through every gate, the fix is not "more tests." Find the relationship or invariant the ontology didn't have, add it, and derive the gate from it. The ontology grows by its failures; it's the record of every mistake you've survived.
+3. **Work from a ticket, not a conversation.** If the task doesn't already name an invariant it protects, an acceptance check, and an out-of-scope line, write those three lines before starting. "Done" means `ontology_verify.py` records `passed` for that invariant on the final code, not that the diff looks right. Updating the ontology line is review, and the hook accepts it as review; it is not the test.
+4. **Change the ontology in the same commit as the schema.** If you add an entity, relationship, or rule to the code, add it to `ontology/<domain>.md` in the same change. The `--changed` hook will block a Stop or a commit where governed paths changed and the ontology didn't. That's deliberate: a stale ontology is worse than none, because the model trusts it. When the change reaches a rule's gate file, the ontology edit has to name that gate or the rule; a Changelog line about something else does not count.
+5. **Rerun the check before you say the rule holds.** When a change affects the ontology, `--changed` prints a `Review:` and a `Verification:` line, and whenever a rule's evidence is failed or stale it warns on its own. `stale` means the repo changed after the check ran, so run it again on the final code. The git hook on a commit marks a worktree pass `worktree_only`, because the command ran the worktree and not what was staged. Report the evidence state as it is; a test you remember passing is not in the record.
+6. **When a gate misses, the ontology is thin.** If a bug gets through every gate, the fix is not "more tests." Find the relationship or invariant the ontology didn't have, add it, and derive the gate from it. The ontology grows by its failures; it's the record of every mistake you've survived.
 
 ## When the hook blocks you
 
@@ -159,6 +157,16 @@ Three valid responses, in order of preference:
 3. The governed glob is too broad — narrow it in the front matter and tell the user.
 
 Never edit the hook to make it pass.
+
+## When the hook warns about evidence
+
+The same check warns, without blocking. At Stop the host shows it as a message to the user; on a commit it prints on stderr:
+
+```
+Verification: Every Well has at least one Lease — stale. Rerun the acceptance check with ontology_verify.py before calling the rule verified.
+```
+
+`failed` means the command exited non-zero: fix the code, or fix the rule with a Changelog line, then rerun. `stale` means a file changed since the run: rerun. `could not run` (`unavailable` or `interrupted`) means the command was missing, timed out, or its log was lost: find out why, then rerun. The pane shows the same states per rule, with a Verify button that drafts the exact command.
 
 ## Querying the ontology (reference)
 
@@ -180,9 +188,11 @@ Output is plain text sized to drop into context. If the repo has several domains
 - Don't put implementation detail in it (function names, file paths other than the `governs` list). Those change; the rules don't.
 - Don't let a code name stand in for a domain word. A rule has to be true with its backticks removed; the code's name for a field or list goes in the gate note, and a collision between the two goes in Vocabulary.
 - Don't bypass the hook. If it's firing wrongly, the `governs` list is wrong — fix that.
+- Don't call a rule verified because its ontology line was written or because the hook let the turn end. If the evidence folder has no passing record for it on this code, it is not verified.
 
 ## Reference
 
 - `assets/ONTOLOGY.template.md` — the file shape with every section and an example line in each.
 - `assets/hooks.settings.json` — the hook entries `install.sh` merges in.
 - `references/writing-invariants.md` — patterns for turning domain rules into checkable invariants (grain, chain, ordering, absence), with examples from monitoring, education, and land/title.
+- `references/review-and-verification.md` — the evidence states in full, what the fingerprint does and does not cover, and the Open questions shape.

@@ -3,7 +3,8 @@
 #   1. copy this skill to .claude/skills/ontology-driven-dev/
 #   2. merge hooks into .claude/settings.json (preserves existing hooks)
 #   3. install a git pre-commit hook that validates and runs --changed --staged
-#   4. seed ontology/ from the template if it doesn't exist
+#   4. gitignore the state file and evidence folder
+#   5. seed ontology/ from the template if it doesn't exist
 #
 # Run from anywhere inside the repo:  bash <path-to-skill>/scripts/install.sh
 set -euo pipefail
@@ -117,7 +118,19 @@ if [ -f "$REPO/.git" ]; then
   echo "git:   this is a worktree; these hooks apply to every worktree and the main checkout"
 fi
 
-# 4. seed ontology/
+# 4. keep the checker's runtime files out of the repo: the state file the pane reads,
+#    and the evidence folder beside it, which holds raw output of acceptance commands
+IGNORE="$REPO/.gitignore"
+touch "$IGNORE"
+for line in ".claude/ontology-state.jsonl" ".claude/ontology-state.evidence/"; do
+  if ! grep -qxF "$line" "$IGNORE"; then
+    [ -s "$IGNORE" ] && [ "$(tail -c1 "$IGNORE")" != "" ] && echo >> "$IGNORE"
+    echo "$line" >> "$IGNORE"
+  fi
+done
+echo "git:   .gitignore has the state file and evidence folder"
+
+# 5. seed ontology/
 if [ ! -d "$REPO/ontology" ]; then
   mkdir -p "$REPO/ontology"
   cp "$DEST/assets/ONTOLOGY.template.md" "$REPO/ontology/EXAMPLE.md"

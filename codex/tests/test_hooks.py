@@ -194,6 +194,18 @@ class CodexHooks(unittest.TestCase):
         self.assertIn('failed', result.get('systemMessage', '').lower())
         self.assertIn('An Order is larger', result.get('systemMessage', ''))
 
+    def test_unfingerprintable_evidence_is_a_warning_not_a_hook_failure(self):
+        env = dict(os.environ, ONTOLOGY_STATE=str(self.root / '.codex/ontology-state.jsonl'))
+        run = subprocess.run([sys.executable, str(PLUGIN / 'skills/ontology-driven-dev/scripts/ontology_verify.py'),
+                              '--rule', 'An Order is larger', '--', sys.executable, '-c', 'print(1)'],
+                             cwd=self.root, env=env, capture_output=True, text=True)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        (self.root / 'docs-link').symlink_to('README.md')  # unrelated, untracked
+        result = self.invoke('PostToolUse', tool_name='Bash')  # asserts the hook exited 0
+        self.assertNotIn('decision', result)
+        self.assertIn('unavailable', result.get('systemMessage', '').lower())
+        self.assertIn('An Order is larger', result.get('systemMessage', ''))
+
 
 if __name__ == "__main__":
     unittest.main()

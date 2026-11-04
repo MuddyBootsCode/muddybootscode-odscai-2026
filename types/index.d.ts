@@ -21,16 +21,16 @@ export type StateFile = {
   domains: string[]
 }
 
-// One run of a rule's own test, as the checker records it after a change to a function the test depends on.
-export type RuleTestRun = { test: string; status: 'pass' | 'fail' | string; output?: string }
-export type RuleRun = {
-  id: string
-  text: string
+// One rule's recorded acceptance check, as ontology_evidence.py reports it in every changed record.
+export type Verification = {
   domain: string
-  status: 'pass' | 'fail' | 'unrun' | string
-  tests: string[]
-  hit: { file: string; name: string }[]
-  runs: RuleTestRun[]
+  rule: string
+  status: 'passed' | 'failed' | 'stale' | 'not_run' | 'unavailable' | 'interrupted' | 'worktree_only' | string
+  /** The argv ontology_verify.py ran, when a run was recorded. */
+  command?: string[]
+  exit?: number | null
+  /** Absolute path of the log the run left; the pane reads its tail for a failed check. */
+  output?: string
 }
 
 export type StateRecord = {
@@ -48,8 +48,9 @@ export type StateRecord = {
   errors?: number
   warnings?: number
   problems?: string[]
-  rules?: RuleRun[]
-  changed_functions?: Record<string, string[]>
+  /** The review gate's verdict: not_required, acknowledged, needs_review, skipped, unavailable. */
+  review?: string
+  verification?: Verification[]
 }
 
 export type Pressed = 'fixing' | 'exploring'
@@ -71,6 +72,6 @@ export type Domain = {
 
 declare module 'claude-code' {
   interface PluginState {
-    'ontology-observer': { records: StateRecord[]; ontology: Domain[]; left: string[]; pressed: Record<string, Pressed>; view: Record<string, View>; showLeft: boolean; openGroups: string[] }
+    'ontology-observer': { records: StateRecord[]; ontology: Domain[]; left: string[]; pressed: Record<string, Pressed>; view: Record<string, View>; showLeft: boolean; openGroups: string[]; outputs: Record<string, string>; scripts: string | null; editMark: string | null }
   }
 }
