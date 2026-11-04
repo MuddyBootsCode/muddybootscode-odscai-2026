@@ -83,7 +83,9 @@ Dates
 
 const DIFF = '--- ItemRecord\n+++ ItemRecord\n@@ -2,3 +2,4 @@\n   id: string;\n   price: number;\n+  weight: number;\n }'
 
-function engine(on: Parameters<Body>[1], status: string[], file: { text: string | null }, ontology: string | null = null, submitted: string[] = [], logs: Record<string, string> = {}) {
+const INSTALLED = '/repo/.claude/skills/ontology-driven-dev/scripts'
+
+function engine(on: Parameters<Body>[1], status: string[], file: { text: string | null }, ontology: string | null = null, submitted: string[] = [], logs: Record<string, string> = {}, scripts: string = INSTALLED) {
   mock.store(on)
   on('prompt.submit', (_, e) => {
     submitted.push(e.text)
@@ -97,6 +99,7 @@ function engine(on: Parameters<Body>[1], status: string[], file: { text: string 
   })
   on('session.root', () => ({ value: '/repo' }))
   on('fs.exists', (_, e) => {
+    if (e.path.endsWith('/ontology_verify.py')) return { value: e.path === `${scripts}/ontology_verify.py` }
     expect(e.path).toBe('/repo/.claude/ontology-state.jsonl')
     return { value: file.text !== null }
   })
@@ -518,13 +521,13 @@ test('the end-of-turn check carries each rule\'s acceptance evidence: failed is 
   const fixText = submitted.at(-1) ?? ''
   expect(fixText).toMatch(/An Order is larger than any Item in it\./)
   expect(fixText).toMatch(/AssertionError: expected \[\] to have length 1/)
-  expect(fixText).toMatch(/ontology_verify\.py --rule "An Order is larger than any Item in it\." -- python3 -m pytest tests\/test_fit\.py -q/)
+  expect(fixText).toMatch(/python3 \.claude\/skills\/ontology-driven-dev\/scripts\/ontology_verify\.py --rule 'An Order is larger than any Item in it\.' -- python3 -m pytest tests\/test_fit\.py -q/)
   await $.turn.complete({ reason: 'answer', answer: 'done', durationMs: 1, isAborted: false, turnId: 't1' })
 
   // Verify on a stale row reruns the command it recorded
   const stale = await ui.find({ type: 'Button', text: /Verify An Order has a date/ })
   await $.ui.press({ plugin: 'ontology-observer', key: stale!.key!, requestId: 'ontology', surface: 'desktop' })
-  expect(submitted.at(-1)).toMatch(/ontology_verify\.py --rule "An Order has a date\." -- python3 -m pytest tests\/test_date\.py -q/)
+  expect(submitted.at(-1)).toMatch(/python3 \.claude\/skills\/ontology-driven-dev\/scripts\/ontology_verify\.py --rule 'An Order has a date\.' -- python3 -m pytest tests\/test_date\.py -q/)
   await $.turn.complete({ reason: 'answer', answer: 'done', durationMs: 1, isAborted: false, turnId: 't2' })
 
   // Verify on a never-run rule asks for a command to be chosen, naming the rule and that it has no gate
@@ -533,7 +536,8 @@ test('the end-of-turn check carries each rule\'s acceptance evidence: failed is 
   const freshText = submitted.at(-1) ?? ''
   expect(freshText).toMatch(/A Item's weight is positive\./)
   expect(freshText).toMatch(/no gate/)
-  expect(freshText).toMatch(/ontology_verify\.py --rule "A Item's `weight` is positive\." -- <command>/)
+  // an apostrophe and backticks in the rule survive the shell: single quotes, the apostrophe spliced in
+  expect(freshText).toContain("ontology_verify.py --rule 'A Item'\\''s `weight` is positive.' -- <command>")
   // a passed row has nothing to press
   expect(await ui.find({ type: 'Button', text: /Verify Every Item has a price/ })).toBeUndefined()
   await ui.unmount()
@@ -546,5 +550,44 @@ test('a record without verification draws no VERIFIED section', async ($, on) =>
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
   expect(await ui.find({ type: 'Text', text: /^VERIFIED/ })).toBeUndefined()
   expect(await ui.find({ type: 'Text', text: /acceptance check/ })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('verify prompts quote every argument for the shell and name the runner where it is installed', async ($, on) => {
+  const status: string[] = []
+  const submitted: string[] = []
+  const rec = { ts: '2026-11-04T12:00:00-0500', mode: 'changed', exit: 0, tier: 'none', files: [], domains: [],
+    ontology_changed: false, skip: null, base: null, staged: false, message: '', review: 'not_required',
+    verification: [
+      { domain: 'demo', rule: 'An Order has a date.', status: 'stale', command: ['python3', '-c', 'assert 1 == 1', '--name', 'a$b'], exit: 0, output: '/repo/.claude/ontology-state.evidence/3.log' },
+    ] }
+  engine(on, status, { text: JSON.stringify(rec) + '\n' }, ONTOLOGY, submitted, {}, '/repo/ontology/scripts')
+  on('turn.complete', (_, e) => ({ text: e.answer }))
+  await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  const stale = await ui.find({ type: 'Button', text: /Verify An Order has a date/ })
+  await $.ui.press({ plugin: 'ontology-observer', key: stale!.key!, requestId: 'ontology', surface: 'desktop' })
+  const text = submitted.at(-1) ?? ''
+  // the tracked copy wins when it exists; a multiword argument and a $ keep their boundaries and meaning
+  expect(text).toContain("python3 ontology/scripts/ontology_verify.py --rule 'An Order has a date.' -- python3 -c 'assert 1 == 1' --name 'a$b'")
+  await ui.unmount()
+})
+
+test('without the runner anywhere the prompt says so instead of naming a missing file', async ($, on) => {
+  const status: string[] = []
+  const submitted: string[] = []
+  const rec = { ts: '2026-11-04T12:00:00-0500', mode: 'changed', exit: 0, tier: 'none', files: [], domains: [],
+    ontology_changed: false, skip: null, base: null, staged: false, message: '', review: 'not_required',
+    verification: [{ domain: 'demo', rule: 'An Order has a date.', status: 'not_run' }] }
+  engine(on, status, { text: JSON.stringify(rec) + '\n' }, ONTOLOGY, submitted, {}, '/nowhere')
+  on('turn.complete', (_, e) => ({ text: e.answer }))
+  await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  const b = await ui.find({ type: 'Button', text: /Verify An Order has a date/ })
+  await $.ui.press({ plugin: 'ontology-observer', key: b!.key!, requestId: 'ontology', surface: 'desktop' })
+  const text = submitted.at(-1) ?? ''
+  expect(text).toMatch(/ontology_verify\.py is not installed in this repo/)
+  expect(text).toMatch(/install\.sh/)
+  expect(text).not.toMatch(/python3 \S*ontology_verify\.py/)
   await ui.unmount()
 })

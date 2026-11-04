@@ -18,6 +18,11 @@ const openGroups = atom({ plugin: 'ontology-observer', key: 'openGroups' } as co
 // The tail of each failed check's log, by the log's path: read once per refresh.
 const outputs = atom({ plugin: 'ontology-observer', key: 'outputs' } as const, {})
 const OUTPUT_TAIL = 1500
+// Where the checker's scripts are, relative to the root: a tracked copy first, else install.sh's
+// destination, else null when neither holds the runner.
+const scripts = atom({ plugin: 'ontology-observer', key: 'scripts' } as const, null)
+const SCRIPT_DIRS = ['ontology/scripts', '.claude/skills/ontology-driven-dev/scripts']
+const RUNNER = 'ontology_verify.py'
 const LEFT_KEY = 'left'
 
 // ---------- the state record ----------
@@ -478,7 +483,7 @@ function gateIssues(files: StateFile[], doms: Domain[], blocked: boolean): Issue
   )
 }
 
-function issues(list: StateRecord[], doms: Domain[], logs: Record<string, string> = {}): Issue[] {
+function issues(list: StateRecord[], doms: Domain[], logs: Record<string, string> = {}, dir: string | null = null): Issue[] {
   const out: Issue[] = []
   const edit = editStillOpen(list)
   if (edit) {
@@ -498,7 +503,7 @@ function issues(list: StateRecord[], doms: Domain[], logs: Record<string, string
         ? `${changes}, and ${where} was not updated for ${card.entity}.`
         : `${changes}; the rules about ${card.entity} need a second look.`
       const fix = blocked
-        ? `The change to ${names} in ${paths} affects the ontology entity ${card.entity}, and ${where} was not updated. ${what} Update ${where} so it describes this change: a line under Entities, Relationships or Invariants, plus a Changelog line. Then run python3 ontology/scripts/ontology_check.py --changed and confirm it passes.`
+        ? `The change to ${names} in ${paths} affects the ontology entity ${card.entity}, and ${where} was not updated. ${what} Update ${where} so it describes this change: a line under Entities, Relationships or Invariants, plus a Changelog line. Then run ${checker(dir)} --changed and confirm it passes.`
         : `The change to ${names} in ${paths} affects the ontology entity ${card.entity}. ${what} Check that each of these rules from ${where} still holds in the code, and add a gate where one is missing: ${quoted(risk.length ? risk : about)}.`
       const explore = explorePrompt(
         `The change to ${names} in ${paths} touches the entity ${card.entity} (${where}). ${what}${note ? ` ${note}` : ''}`,
@@ -519,7 +524,7 @@ function issues(list: StateRecord[], doms: Domain[], logs: Record<string, string
     const title = g?.[1] ? `No gate: ${g[1]}` : rest
     const fix = g?.[1]
       ? `Write an executable gate for this invariant from ontology/${file}: "${g[1]}". Add the test or constraint that enforces it, run it, then record it on the invariant line as [gate: <name>] and add a Changelog line.`
-      : `Fix this problem in ontology/${file}: ${rest}. Then run python3 ontology/scripts/ontology_check.py --validate.`
+      : `Fix this problem in ontology/${file}: ${rest}. Then run ${checker(dir)} --validate.`
     const ruleText = g?.[1]
     const named = ruleText ? Object.keys(doms.find(d => d.file === file)?.entities ?? {}).filter(e => mentions(ruleText, e)) : []
     const explore = explorePrompt(
@@ -529,7 +534,7 @@ function issues(list: StateRecord[], doms: Domain[], logs: Record<string, string
     )
     out.push({ id: `validate:${hash(line)}`, level, title, rules: [], fix, explore })
   }
-  out.push(...evidenceIssues(list, doms, logs))
+  out.push(...evidenceIssues(list, doms, logs, dir))
   return out.sort((a, b) => (a.level === b.level ? 0 : a.level === 'error' ? -1 : 1))
 }
 
@@ -563,27 +568,43 @@ function ruleOf(doms: Domain[], v: Verification): Rule {
   return stored ? { ...stored, file } : { text: v.rule, gate: null, file }
 }
 
+// One argument as a POSIX shell reads it back unchanged: bare when it is plain, else in single
+// quotes, with each apostrophe spliced in as '\''. Backticks and $ are inert inside single quotes.
+function shellQuote(arg: string): string {
+  return /^[A-Za-z0-9_\-./=:@%+,]+$/.test(arg) ? arg : `'${arg.replace(/'/g, "'\\''")}'`
+}
+
 function argv(command: string[] | undefined): string {
-  return command?.join(' ') ?? '<command>'
+  return command ? command.map(shellQuote).join(' ') : '<command>'
 }
 
-// The exact runner call: the rule's text in double quotes, so an apostrophe in it is no trouble.
-function verifyCommand(v: Verification): string {
-  return `python3 ontology/scripts/ontology_verify.py --rule "${v.rule}" -- ${argv(v.command)}`
+function checker(dir: string | null): string {
+  return `python3 ${dir ?? SCRIPT_DIRS[0]}/ontology_check.py`
 }
 
-function verifyPrompt(doms: Domain[], v: Verification): string {
+// The exact runner call, every argument quoted for the shell.
+function verifyCommand(v: Verification, dir: string | null): string {
+  return `${dir ? `python3 ${dir}/${RUNNER}` : RUNNER} --rule ${shellQuote(v.rule)} -- ${argv(v.command)}`
+}
+
+// "Run <command> from the repo root…", or how to get the runner when the repo has none.
+function runLine(v: Verification, dir: string | null): string {
+  if (dir) return `Run ${verifyCommand(v, dir)} from the repo root and report whether it records passed.`
+  return `${RUNNER} is not installed in this repo. Install the ontology-driven-dev skill with its install.sh, or copy its scripts/ folder to ontology/scripts/, then record the check with ${verifyCommand(v, null)} and report whether it records passed.`
+}
+
+function verifyPrompt(doms: Domain[], v: Verification, dir: string | null): string {
   const rule = ruleOf(doms, v)
   const text = plain(v.rule)
   const where = `ontology/${v.domain}.md`
-  const run = `Run ${verifyCommand(v)} from the repo root and report whether it records passed.`
+  const run = runLine(v, dir)
   if (v.status === 'stale') return `The evidence for the rule "${text}" (${where}) is stale: the repo changed after ${argv(v.command)} last ran. ${run}`
   if (v.status === 'worktree_only') return `The rule "${text}" (${where}) passed in the worktree, but what is staged was never checked. Stage everything the check depends on, then ${run.charAt(0).toLowerCase()}${run.slice(1)}`
   return `The rule "${text}" (${where}) has no recorded acceptance check.${rule.gate ? ` Its gate is ${plain(rule.gate)}.` : ' It has no gate: nothing in the code enforces it.'} Choose the test command that checks this rule (write it first if there is none), then ${run.charAt(0).toLowerCase()}${run.slice(1)}`
 }
 
 // A failed check is an error; one that could not run is a warning. The rest are rows, not issues.
-function evidenceIssues(list: StateRecord[], doms: Domain[], logs: Record<string, string>): Issue[] {
+function evidenceIssues(list: StateRecord[], doms: Domain[], logs: Record<string, string>, dir: string | null): Issue[] {
   return evidence(list).filter(v => v.status === 'failed' || couldNotRun(v)).map(v => {
     const rule = ruleOf(doms, v)
     const text = plain(v.rule)
@@ -594,8 +615,8 @@ function evidenceIssues(list: StateRecord[], doms: Domain[], logs: Record<string
     const failed = v.status === 'failed'
     const title = failed ? `A rule's acceptance check fails: ${text}` : `${text}: its acceptance check could not run.`
     const fix = failed
-      ? `The acceptance check recorded for the rule "${text}" (${where}) failed${v.exit != null ? ` with exit ${v.exit}` : ''}: ${cmd}.${output ? ` Output:\n${output}\n` : ''} Make the code satisfy the rule again, or if the rule itself is wrong, change it in ${where} with a Changelog line. Then rerun ${verifyCommand(v)} and confirm it records passed.`
-      : `The acceptance check for the rule "${text}" (${where}) could not run: ${cmd}. The command was missing, timed out, was interrupted, or its log was lost. Find out why, then rerun ${verifyCommand(v)} and confirm it records passed.`
+      ? `The acceptance check recorded for the rule "${text}" (${where}) failed${v.exit != null ? ` with exit ${v.exit}` : ''}: ${cmd}.${output ? ` Output:\n${output}\n` : ''} Make the code satisfy the rule again, or if the rule itself is wrong, change it in ${where} with a Changelog line. Then ${dir ? 'rerun' : 'record it again:'} ${dir ? verifyCommand(v, dir) : runLine(v, null)}${dir ? ' and confirm it records passed.' : ''}`
+      : `The acceptance check for the rule "${text}" (${where}) could not run: ${cmd}. The command was missing, timed out, was interrupted, or its log was lost. Find out why, then ${dir ? 'rerun' : 'record it again:'} ${dir ? verifyCommand(v, dir) : runLine(v, null)}${dir ? ' and confirm it records passed.' : ''}`
     const explore = explorePrompt(
       `The acceptance check ${cmd} for the rule "${text}" (${where}) ${failed ? 'fails' : 'could not run'}.${output ? ` Its output:\n${output}` : ''}`,
       [rule],
@@ -655,6 +676,18 @@ async function refresh($: EngineInterface): Promise<void> {
   }
   const doms = await loadOntology($)
   const ids = await leftIds($)
+  const root = await projectRoot($)
+  let dir: string | null = null
+  for (const candidate of SCRIPT_DIRS) {
+    try {
+      if (await $.fs.exists(`${root}/${candidate}/${RUNNER}`)) {
+        dir = candidate
+        break
+      }
+    } catch {
+      // unreadable counts as absent
+    }
+  }
   const logs: Record<string, string> = {}
   for (const v of evidence(list)) {
     if (!v.output || !(v.status === 'failed' || couldNotRun(v))) continue
@@ -669,6 +702,7 @@ async function refresh($: EngineInterface): Promise<void> {
   await update($, ontology, () => doms)
   await update($, left, () => ids)
   await update($, outputs, () => logs)
+  await update($, scripts, () => dir)
   $.ui.status(statusLine(list))
 }
 
@@ -718,13 +752,14 @@ export const register: Register = on => {
     const leftShown = await read($, showLeft)
     const unfolded = await read($, openGroups)
     const logs = await read($, outputs)
+    const dir = await read($, scripts)
     const last = list.at(-1)
     const latest = new Map<Stage, StateRecord>()
     for (const r of list) {
       const s = stageOf(r)
       if (s) latest.set(s, r)
     }
-    const all = issues(list, doms, logs)
+    const all = issues(list, doms, logs, dir)
     const open = all.filter(i => !dismissed.includes(i.id))
     const leftCount = all.length - open.length
     const edits = latestEdits(list)
@@ -954,7 +989,7 @@ export const register: Register = on => {
                   inChat[verifyId(v)] ? (
                     <Text dimColor italic>Verifying in chat…</Text>
                   ) : (
-                    <Button key={verifyId(v)} label={`Verify ${plain(v.rule)}`} onPress={() => void act(verifyId(v), 'fixing', verifyPrompt(doms, v))} />
+                    <Button key={verifyId(v)} label={`Verify ${plain(v.rule)}`} onPress={() => void act(verifyId(v), 'fixing', verifyPrompt(doms, v, dir))} />
                   )
                 )}
               </Box>
