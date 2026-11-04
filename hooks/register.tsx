@@ -23,6 +23,11 @@ const OUTPUT_TAIL = 1500
 const scripts = atom({ plugin: 'ontology-observer', key: 'scripts' } as const, null)
 const SCRIPT_DIRS = ['ontology/scripts', '.claude/skills/ontology-driven-dev/scripts']
 const RUNNER = 'ontology_verify.py'
+// How many end-of-turn checks the state held when this session last edited a file. While the
+// count is still the same, the fingerprint has moved and no check has looked since: passes are
+// stale. The per-edit check writes no record for an ungoverned or ontology file, so the pane
+// keeps this mark itself.
+const editMark = atom({ plugin: 'ontology-observer', key: 'editMark' } as const, null)
 const LEFT_KEY = 'left'
 
 // ---------- the state record ----------
@@ -483,7 +488,7 @@ function gateIssues(files: StateFile[], doms: Domain[], blocked: boolean): Issue
   )
 }
 
-function issues(list: StateRecord[], doms: Domain[], logs: Record<string, string> = {}, dir: string | null = null): Issue[] {
+function issues(list: StateRecord[], doms: Domain[], logs: Record<string, string> = {}, dir: string | null = null, mark: number | null = null): Issue[] {
   const out: Issue[] = []
   const edit = editStillOpen(list)
   if (edit) {
@@ -534,20 +539,24 @@ function issues(list: StateRecord[], doms: Domain[], logs: Record<string, string
     )
     out.push({ id: `validate:${hash(line)}`, level, title, rules: [], fix, explore })
   }
-  out.push(...evidenceIssues(list, doms, logs, dir))
+  out.push(...evidenceIssues(list, doms, logs, dir, mark))
   return out.sort((a, b) => (a.level === b.level ? 0 : a.level === 'error' ? -1 : 1))
 }
 
 // Each rule's recorded acceptance check, as the newest end-of-turn or commit check saw it. An
 // edit since then changed the fingerprint, so a pass it reported is stale until the next check.
-function evidence(list: StateRecord[]): Verification[] {
+function checkCount(list: StateRecord[]): number {
+  return list.filter(r => r.mode === 'changed').length
+}
+
+function evidence(list: StateRecord[], mark: number | null = null): Verification[] {
   let at = -1
   list.forEach((r, i) => {
     if (r.mode === 'changed') at = i
   })
   if (at === -1) return []
   const checks = list[at]?.verification ?? []
-  const editedSince = list.slice(at + 1).some(r => r.mode === 'touched')
+  const editedSince = list.slice(at + 1).some(r => r.mode === 'touched') || mark === checkCount(list)
   if (!editedSince) return checks
   return checks.map(v => (v.status === 'passed' || v.status === 'worktree_only' ? { ...v, status: 'stale' } : v))
 }
@@ -613,8 +622,8 @@ function verifyPrompt(doms: Domain[], v: Verification, dir: string | null): stri
 }
 
 // A failed check is an error; one that could not run is a warning. The rest are rows, not issues.
-function evidenceIssues(list: StateRecord[], doms: Domain[], logs: Record<string, string>, dir: string | null): Issue[] {
-  return evidence(list).filter(v => v.status === 'failed' || couldNotRun(v)).map(v => {
+function evidenceIssues(list: StateRecord[], doms: Domain[], logs: Record<string, string>, dir: string | null, mark: number | null): Issue[] {
+  return evidence(list, mark).filter(v => v.status === 'failed' || couldNotRun(v)).map(v => {
     const rule = ruleOf(doms, v)
     const text = plain(v.rule)
     const where = `ontology/${v.domain}.md`
@@ -734,7 +743,11 @@ export const register: Register = on => {
   // The settings hooks run beneath: once next(e) settles the checker has written its record.
   on('classic.PostToolUse', async ($, e, next) => {
     const ran = await next(e)
-    if (EDIT_TOOLS.has(e.tool_name)) await refresh($)
+    if (EDIT_TOOLS.has(e.tool_name)) {
+      await refresh($)
+      const list = await read($, records)
+      await update($, editMark, () => checkCount(list))
+    }
     return ran
   }).catch(($, e, next) => next(e))
 
@@ -762,13 +775,14 @@ export const register: Register = on => {
     const unfolded = await read($, openGroups)
     const logs = await read($, outputs)
     const dir = await read($, scripts)
+    const edited = await read($, editMark)
     const last = list.at(-1)
     const latest = new Map<Stage, StateRecord>()
     for (const r of list) {
       const s = stageOf(r)
       if (s) latest.set(s, r)
     }
-    const all = issues(list, doms, logs, dir)
+    const all = issues(list, doms, logs, dir, edited)
     const open = all.filter(i => !dismissed.includes(i.id))
     const leftCount = all.length - open.length
     const edits = latestEdits(list)
@@ -911,7 +925,7 @@ export const register: Register = on => {
       void update($, openGroups, keys => (keys.includes(key) ? keys.filter(k => k !== key) : [...keys, key]))
 
     // Every rule's recorded acceptance check: the failures are issues above, the rest are rows here.
-    const checks = evidence(list)
+    const checks = evidence(list, edited)
     const count = (f: (v: Verification) => boolean) => checks.filter(f).length
     const passedCount = count(v => v.status === 'passed')
     const tally = [

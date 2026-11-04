@@ -598,8 +598,6 @@ test('an edit after the last end-of-turn check turns its passes stale until the 
   const passed = { ts: '2026-11-04T13:00:00-0500', mode: 'changed', exit: 0, tier: 'none', files: [], domains: [],
     ontology_changed: false, skip: null, base: null, staged: false, message: '', review: 'not_required',
     verification: [{ domain: 'demo', rule: 'Every Item has a price.', status: 'passed', command: ['pytest', 'tests/test_price.py', '-q'], exit: 0, output: '/repo/.claude/ontology-state.evidence/2.log' }] }
-  // an edit outside every governed path still changes the fingerprint
-  const edited = { ts: '2026-11-04T13:01:00-0500', mode: 'touched', exit: 0, tier: 'none', files: [], domains: [], message: '' }
   engine(on, status, file, ONTOLOGY)
   await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
 
@@ -610,7 +608,8 @@ test('an edit after the last end-of-turn check turns its passes stale until the 
   expect(await before.find({ type: 'Button', text: /Verify Every Item has a price/ })).toBeUndefined()
   await before.unmount()
 
-  file.text += JSON.stringify(edited) + '\n'
+  // an edit outside every governed path: the per-edit check writes no record, but the
+  // fingerprint changed all the same, so the pass is stale
   await $.classic.PostToolUse({ tool_name: 'Edit', tool_input: { file_path: 'README.md' }, tool_response: {}, tool_use_id: 't1' })
   const after = await $.ui.mount({ ...PANE, surface: 'desktop' })
   expect(await after.find({ type: 'Text', text: /^✓ Every Item has a price/ })).toBeUndefined()
@@ -625,4 +624,20 @@ test('an edit after the last end-of-turn check turns its passes stale until the 
   const again = await $.ui.mount({ ...PANE, surface: 'desktop' })
   expect(await again.find({ type: 'Text', text: /^✓ Every Item has a price/ })).toBeDefined()
   await again.unmount()
+
+  // a governed edit, which does leave a record, is stale the same way
+  file.text += JSON.stringify({ ts: '2026-11-04T13:03:00-0500', mode: 'touched', exit: 0, tier: 'touched',
+    files: [{ path: 'src/utils.ts', tier: 'touched', signals: [], domains: ['demo'] }], domains: ['demo'], message: '' }) + '\n'
+  await $.classic.PostToolUse({ tool_name: 'Write', tool_input: { file_path: 'src/utils.ts' }, tool_response: {}, tool_use_id: 't2' })
+  const governed = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect((await governed.find({ type: 'Text', text: /^▲ Every Item has a price/ }))?.text).toMatch(/stale/)
+  await governed.unmount()
+
+  // a tool that edits nothing changes nothing
+  file.text += JSON.stringify({ ...passed, ts: '2026-11-04T13:04:00-0500' }) + '\n'
+  await $.classic.Stop({ stop_hook_active: false })
+  await $.classic.PostToolUse({ tool_name: 'Read', tool_input: { file_path: 'README.md' }, tool_response: {}, tool_use_id: 't3' })
+  const read = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect(await read.find({ type: 'Text', text: /^✓ Every Item has a price/ })).toBeDefined()
+  await read.unmount()
 })
