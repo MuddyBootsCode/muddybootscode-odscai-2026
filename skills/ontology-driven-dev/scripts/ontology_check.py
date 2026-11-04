@@ -337,11 +337,18 @@ def changed(onts, staged: bool, msg_file: str | None = None, stop: bool = False,
     from ontology_evidence import statuses
     try:
         verification = statuses(root, onts)
-    except (OSError, ValueError, ComparisonError) as exc:
-        eprint(f"Verification unavailable: {exc}")
+    except ComparisonError as exc:
+        # Git itself failed: the review comparison is not available either.
+        eprint(str(exc))
         record_state(root, {"mode": "changed", "exit": 1, "review": "unavailable",
                             "verification": [], "message": str(exc)})
         return 1
+    except (OSError, ValueError) as exc:
+        # The evidence cannot be fingerprinted (a symlink, a submodule, an unreadable log).
+        # That makes every rule's evidence unavailable; it does not make the review fail.
+        eprint(f"Verification unavailable: {exc}")
+        verification = [{"domain": o["domain"], "rule": r["text"], "status": "unavailable"}
+                        for o in onts for r in o["invariants"]]
     if staged:
         # Commands execute the worktree, never the index. Do not transfer proof.
         for item in verification:

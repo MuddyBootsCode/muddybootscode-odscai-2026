@@ -156,3 +156,37 @@ class StopWarnsOnEvidence(Repo):
         r = check(self.root, '--changed', '--stop')
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertNotIn('Verification', r.stderr)
+
+
+class EvidenceUnavailableDoesNotBlock(Repo):
+    """A fingerprint the runner cannot take makes evidence unavailable; it never fails review."""
+
+    def setUp(self):
+        super().setUp()
+        run = subprocess.run([sys.executable, str(SCRIPTS / 'ontology_verify.py'),
+                              '--rule', 'An Order is larger', '--', sys.executable, '-c', 'print(1)'],
+                             cwd=self.root, capture_output=True, text=True)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        (self.root / 'docs-link').symlink_to('README.md')  # unrelated, untracked
+
+    def test_unrelated_commit_is_not_blocked(self):
+        r = check(self.root, '--changed', '--staged')
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn('unavailable', r.stderr)
+        rec = state(self.root)[-1]
+        self.assertEqual(rec['review'], 'not_required')
+        self.assertEqual(rec['verification'][0]['status'], 'unavailable')
+
+    def test_acknowledged_change_still_passes_review(self):
+        self.edit('src/types.ts', 'price: number', 'price: string')
+        self.edit('mcp/schema.py', 'One item.', 'One item line.')
+        self.edit('ontology/orders.md', 'Initial.', 'Item representation reviewed.')
+        r = check(self.root, '--changed')
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(state(self.root)[-1]['review'], 'acknowledged')
+
+    def test_skip_marker_still_works(self):
+        self.edit('src/types.ts', 'price: number', 'price: string')
+        self.edit('mcp/schema.py', 'One item.', 'One item line.')
+        r = check(self.root, '--changed', env={'ONTOLOGY_SKIP': 'rename only'})
+        self.assertEqual(r.returncode, 0, r.stderr)
