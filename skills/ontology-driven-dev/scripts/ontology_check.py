@@ -312,6 +312,16 @@ def ontology_diff_text(root: Path, files: list[str], old_rev: str, staged: bool)
     return "\n".join(out)
 
 
+def evidence_warning(verification: list[dict]) -> str | None:
+    """One line naming every rule whose recorded acceptance check is not a pass.
+    Advisory: the exit status is the review gate, and this never changes it."""
+    bad = [v for v in verification if v["status"] in {"failed", "stale", "unavailable", "interrupted"}]
+    if not bad:
+        return None
+    return "Verification: " + "; ".join(f"{v['rule']} — {v['status']}" for v in bad) + \
+        ". Rerun the acceptance check with ontology_verify.py before calling the rule verified."
+
+
 def changed(onts, staged: bool, msg_file: str | None = None, stop: bool = False, base: str | None = None) -> int:
     if not onts:
         return 0  # no ontology yet; nothing to enforce
@@ -345,6 +355,9 @@ def changed(onts, staged: bool, msg_file: str | None = None, stop: bool = False,
                             "ontology_changed": bool(onto_files), "skip": None, "domains": [],
                             "review": "not_required", "verification": verification,
                             "base": base, "staged": staged, "message": ""})
+        warning = evidence_warning(verification)
+        if warning:
+            eprint(warning)
         return 0
     new_rev = "" if staged else None
     infos = [classify(root, f, onts, old_rev, new_rev) for f in governed]
@@ -371,6 +384,9 @@ def changed(onts, staged: bool, msg_file: str | None = None, stop: bool = False,
                             "review": review, "verification": verification,
                             "ontology_changed": bool(onto_files), "skip": skip, "domains": domains,
                             "base": base, "staged": staged, "message": message, "reopen": reopen})
+        warning = evidence_warning(verification)
+        if warning:
+            eprint(warning)
         return code
 
     if not affecting:

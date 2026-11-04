@@ -126,3 +126,33 @@ class Verification(Repo):
         self.assertNotEqual(result.returncode, 0)
         time.sleep(.6)
         self.assertFalse((self.root / 'late-side-effect').exists())
+
+
+class StopWarnsOnEvidence(Repo):
+    """The Stop hook says when recorded evidence is bad, even with a clean diff."""
+
+    def verify(self, code):
+        return subprocess.run([sys.executable, str(SCRIPTS / 'ontology_verify.py'),
+                               '--rule', 'An Order is larger', '--', sys.executable, '-c', code],
+                              cwd=self.root, capture_output=True, text=True)
+
+    def test_failed_evidence_warns_at_stop_with_a_clean_diff(self):
+        self.assertNotEqual(self.verify("raise AssertionError('bad order')").returncode, 0)
+        r = check(self.root, '--changed', '--stop')
+        self.assertEqual(r.returncode, 0, r.stderr)  # advisory, never a block
+        self.assertIn('An Order is larger', r.stderr)
+        self.assertIn('failed', r.stderr)
+
+    def test_stale_evidence_warns_after_an_edit_anywhere(self):
+        self.assertEqual(self.verify('print(1)').returncode, 0)
+        self.write('README.md', 'changed\n')
+        r = check(self.root, '--changed', '--stop')
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn('An Order is larger', r.stderr)
+        self.assertIn('stale', r.stderr)
+
+    def test_passing_evidence_is_quiet(self):
+        self.assertEqual(self.verify('print(1)').returncode, 0)
+        r = check(self.root, '--changed', '--stop')
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn('Verification', r.stderr)
