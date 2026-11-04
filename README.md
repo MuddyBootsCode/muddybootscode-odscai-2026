@@ -2,7 +2,7 @@
 
 Choose your agent: [Claude Code](#claude-code-install) or
 [Codex](codex/README.md). Both use the same ontology checker. Claude includes
-the observer pane; Codex returns findings in the conversation through native
+the observer pane; Codex provides a local browser observer and returns warnings through native
 lifecycle hooks.
 
 ## ODSC AI West 2026 workshop

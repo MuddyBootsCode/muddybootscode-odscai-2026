@@ -94,7 +94,12 @@ the change. Hooks are local feedback, can be disabled, and do not replace CI.
 The shared checker detects ontology structure and change signals. It does not
 automatically execute every test named in `[gate: ...]`. Report actual tests and
 their results separately. The Claude `/ontology` pane is not part of this plugin;
-Codex findings appear in the conversation and `.codex/ontology-state.jsonl`.
+Codex findings appear as warnings and in `.codex/ontology-state.jsonl`.
+For visible monitoring, run `<plugin-root>/codex/scripts/ontology_observer.py` with
+`--root <target-root> --open` and the same `--state` override as other checks.
+See `<plugin-root>/codex/README.md` for `ontology/checks.json`: configure exact rule
+text and a reviewed argv list to enable Run check. Never derive executable commands
+from gate annotations. The observer is a separate browser page, not a Codex pane.
 
 If Git/CI integration is requested, copy the shared Python and function-mapper
 scripts into a tracked location such as `ontology/scripts/`, and wire the required

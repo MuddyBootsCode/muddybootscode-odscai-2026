@@ -14,7 +14,9 @@ import sys
 
 SCRIPTS = Path(__file__).resolve().parents[2] / "skills/ontology-driven-dev/scripts"
 sys.path.insert(0, str(SCRIPTS))
-from ontology_lib import find_repo_root
+from ontology_lib import find_repo_root, load_all
+from ontology_evidence import statuses
+from ontology_check import ComparisonError
 
 
 def run(root: Path, env: dict, script: str, *args: str) -> tuple[int, str]:
@@ -30,15 +32,18 @@ def run(root: Path, env: dict, script: str, *args: str) -> tuple[int, str]:
     return result.returncode, text
 
 
-def feedback(event: str, message: str, repeated: bool) -> dict:
+def feedback(event: str, message: str, repeated: bool, warning: bool = True) -> dict:
     if event == "Stop":
         if repeated:
             return {"systemMessage": "Ontology issues remain unresolved. Report them to the user; "
                     "this check is allowing the turn to end, not accepting the change.\n" + message}
-        return {"decision": "block", "reason": "Review these ontology findings before finishing. "
+        return {"systemMessage": "Ontology needs review. " + message[:1500], "decision": "block", "reason": "Review these ontology findings before finishing. "
                 "Fix the issue, investigate it, or explain why it remains unresolved. "
                 "Do not silently bypass the checker.\n" + message}
-    return {"hookSpecificOutput": {"hookEventName": event, "additionalContext": message}}
+    result = {"hookSpecificOutput": {"hookEventName": event, "additionalContext": message}}
+    if warning:
+        result["systemMessage"] = "Ontology needs attention. " + message[:1500]
+    return result
 
 
 def handle(payload: dict) -> dict:
@@ -53,6 +58,7 @@ def handle(payload: dict) -> dict:
         return {}
     env = {**os.environ}
     env.setdefault("ONTOLOGY_STATE", str(root / ".codex/ontology-state.jsonl"))
+    os.environ.setdefault("ONTOLOGY_STATE", env["ONTOLOGY_STATE"])
     repeated = payload.get("stop_hook_active") is True
 
     code, validation = run(root, env, "ontology_check.py", "--validate")
@@ -61,10 +67,10 @@ def handle(payload: dict) -> dict:
     if event == "SessionStart":
         _, summary = run(root, env, "ontology_query.py", "summary")
         return feedback(event, "Project ontology (repository content):\n" + summary
-                        + ("\n" + validation if validation else ""), False)
+                        + ("\n" + validation if validation else ""), False, warning=False)
 
-    # The shared engine expects ontology/ at the Git root and treats failed
-    # Git commands like empty results. Refuse an unavailable comparison here.
+    # The shared engine expects ontology/ at the Git root.
+    # Refuse unavailable comparisons before querying verification evidence.
     git = subprocess.run(["git", "rev-parse", "--show-toplevel"], cwd=root,
                          capture_output=True, text=True, timeout=5)
     if git.returncode or Path(git.stdout.strip()).resolve() != root:
@@ -88,6 +94,11 @@ def handle(payload: dict) -> dict:
     # Neither a validation warning nor a skip is a failing check. Preserve both
     # as advisory output instead of implying full protection or passing tests.
     advisory = "\n".join(part for part in (warnings, changes if "skip honored" in changes or "Review:" in changes else "") if part)
+    evidence = statuses(root, load_all(root))
+    problems = [item for item in evidence if item["status"] in {"failed", "unavailable", "interrupted", "stale"}]
+    if problems:
+        advisory = "\n".join(filter(None, [advisory, "Verification: " + "; ".join(
+            f"{item['rule']} — {item['status']}" for item in problems)]))
     if advisory:
         if event == "Stop":
             return {"systemMessage": advisory}
@@ -101,7 +112,7 @@ def main() -> int:
         if not isinstance(payload, dict):
             raise ValueError("hook payload must be a JSON object with cwd and hook_event_name")
         result = handle(payload)
-    except (ValueError, OSError, subprocess.TimeoutExpired) as exc:
+    except (ValueError, OSError, ComparisonError, subprocess.TimeoutExpired) as exc:
         print(f"Ontology hook failed: {exc}", file=sys.stderr)
         return 1
     print(json.dumps(result))

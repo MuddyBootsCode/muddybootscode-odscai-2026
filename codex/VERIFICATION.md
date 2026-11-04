@@ -68,3 +68,32 @@ Ignored dependencies, external services and environment changes require a rerun.
 Symlink-backed sources and submodules are rejected for verification. Passing worktree
 evidence is labeled worktree_only for staged comparisons. No production deploy, merge,
 remote publication or claim of complete GradGraph ontology coverage was made.
+
+
+# Ontology plugin 0.3.0 observer acceptance — 2026-11-04
+
+- Shared suite: 64 passed with the TypeScript prerequisite enabled, no skips.
+- Codex suite: 26 passed, including real loopback HTTP and command execution.
+- Notebook suite: 16 passed (existing Python deprecation warning).
+- Negative tests reproduced and then prevented completion/result races, lost
+  multiline open-question context, and timeout descendants continuing to write.
+- Independent review covered observer status correctness and token/Host/Origin/
+  command allowlist boundaries; both reported findings were fixed with regressions.
+
+In the rendered local browser observer, selected Run check for all three GradGraph
+rules. The entitlement suite passed 25 tests for each of its two rule records; the
+service-principal selection passed 34 tests (67 deselected, existing httpx warning).
+The observer displayed the resulting rule status and retained output. These are
+local checks of the narrow provisional ontology, not production acceptance.
+
+A disposable UI fixture then displayed Not run → Running → Failed, including a
+real AssertionError and exit 1. Editing its input displayed Stale; rerunning displayed
+Passed, retained after browser reload. Copy fix request displayed its completion
+message. Stopping the server displayed Disconnected, an outdated-results warning,
+and disabled actions. This fixture exercises the display, not an Order domain acceptance test.
+The existing shared evidence tests separately exercise fail/repair/source freshness.
+
+Version 0.3 direct `systemMessage` warnings are verified at the hook protocol boundary.
+Version 0.2 native CLI lifecycle acceptance above remains the native-host evidence;
+0.3 has not been reinstalled or independently verified in a fresh desktop lifecycle.
+The observer is a separate local browser page, not an embedded Codex mod.

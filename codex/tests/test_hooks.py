@@ -177,5 +177,23 @@ class CodexHooks(unittest.TestCase):
         self.assertEqual(json.loads(result.stdout)["decision"], "block")
 
 
+    def test_post_tool_findings_are_visible_without_agent_narration(self):
+        self.change_entity()
+        result = self.invoke('PostToolUse', tool_name='Bash')
+        self.assertIn('Item', result.get('systemMessage', ''))
+
+    def test_failed_evidence_warns_even_when_diff_is_clean(self):
+        # Test itself is outside the target tree; a failing acceptance command
+        # produces evidence without creating an affecting source change.
+        env = dict(os.environ, ONTOLOGY_STATE=str(self.root / '.codex/ontology-state.jsonl'))
+        run = subprocess.run([sys.executable, str(PLUGIN / 'skills/ontology-driven-dev/scripts/ontology_verify.py'),
+                              '--rule', 'An Order is larger', '--', sys.executable, '-c', 'raise AssertionError("bad order")'],
+                             cwd=self.root, env=env, capture_output=True, text=True)
+        self.assertNotEqual(run.returncode, 0)
+        result = self.invoke('PostToolUse', tool_name='Bash')
+        self.assertIn('failed', result.get('systemMessage', '').lower())
+        self.assertIn('An Order is larger', result.get('systemMessage', ''))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -9,6 +9,8 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
+import signal
 from pathlib import Path
 import subprocess
 import sys
@@ -20,7 +22,19 @@ from ontology_evidence import evidence_dir, rule_key, snapshot
 from ontology_check import ComparisonError
 
 
+def write_record(path, record):
+    temporary = path.with_suffix('.tmp')
+    temporary.write_text(json.dumps(record) + '\n')
+    temporary.replace(path)
+
+
+def interrupted(signum, frame):
+    raise KeyboardInterrupt
+
+
 def main() -> int:
+    if os.name == 'posix':
+        signal.signal(signal.SIGTERM, interrupted)
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--rule', required=True, help='Unique substring of an invariant')
     parser.add_argument('--domain')
@@ -47,14 +61,27 @@ def main() -> int:
                   'domain': ontology['domain'], 'snapshot': before, 'status': 'interrupted',
                   'command': command, 'exit': None, 'output': str(output), 'cwd': str(root)}
         # Invalidate an older success before starting, including when this process is killed.
-        record_path.write_text(json.dumps(record) + '\n')
+        write_record(record_path, record)
         error = ''
         with output.open('w') as stream:
             try:
-                result = subprocess.run(command, cwd=root, stdout=stream, stderr=subprocess.STDOUT,
-                                        timeout=args.timeout)
-                record['exit'] = result.returncode
-                record['status'] = 'passed' if result.returncode == 0 else 'failed'
+                process = subprocess.Popen(command, cwd=root, stdout=stream, stderr=subprocess.STDOUT,
+                                           start_new_session=os.name == 'posix')
+                try:
+                    exit_code = process.wait(timeout=args.timeout)
+                finally:
+                    # A test runner can spawn workers; stop the entire command group,
+                    # including descendants left behind after the parent exits.
+                    if os.name == 'posix':
+                        try:
+                            os.killpg(process.pid, signal.SIGKILL)
+                        except ProcessLookupError:
+                            pass
+                    elif process.poll() is None:
+                        process.kill()
+                    process.wait()
+                record['exit'] = exit_code
+                record['status'] = 'passed' if exit_code == 0 else 'failed'
             except (OSError, subprocess.TimeoutExpired) as exc:
                 error = str(exc)
                 stream.write(error + '\n')
@@ -67,7 +94,7 @@ def main() -> int:
             record['status'] = 'unavailable'
             error = str(exc)
         record['output_sha256'] = hashlib.sha256(output.read_bytes()).hexdigest()
-        record_path.write_text(json.dumps(record) + '\n')
+        write_record(record_path, record)
         print(json.dumps(record))
         if error:
             print(error, file=sys.stderr)

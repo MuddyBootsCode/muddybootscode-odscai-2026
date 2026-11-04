@@ -1,6 +1,6 @@
 {
   "name": "ontology-driven-dev",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Build and query domain ontologies, then check governed changes during the Codex lifecycle.",
   "author": {
     "name": "Michael Porter / Muddy Boots Code"
@@ -12,7 +12,7 @@
   "interface": {
     "displayName": "Ontology-driven development",
     "shortDescription": "Make domain rules explicit and check changes",
-    "longDescription": "Write the entities, relationships, vocabulary, intent and invariants of a project, then surface ontology findings in Codex. Includes session context, feedback after patch and shell tools, and an end-of-turn check. The Claude Code observer pane is separate.",
+    "longDescription": "Write the entities, relationships, vocabulary, intent and invariants of a project, then surface ontology findings in Codex. Includes session context, feedback after patch and shell tools, and an end-of-turn check. Includes an optional local browser observer for live rule status and explicit acceptance checks.",
     "developerName": "Muddy Boots Code",
     "category": "Developer Tools",
     "capabilities": [

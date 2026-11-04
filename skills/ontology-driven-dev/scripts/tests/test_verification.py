@@ -115,3 +115,14 @@ class Verification(Repo):
         result = self.verify('print(1)')
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('symlink', result.stderr.lower())
+
+    def test_timeout_stops_descendant_processes(self):
+        import time
+        child = "import time; from pathlib import Path; time.sleep(.5); Path('late-side-effect').touch()"
+        parent = f"import subprocess,sys,time; subprocess.Popen([sys.executable,'-c',{child!r}]); time.sleep(2)"
+        result = subprocess.run([sys.executable, str(SCRIPTS / 'ontology_verify.py'),
+                                 '--rule', 'An Order is larger', '--timeout', '.2', '--',
+                                 sys.executable, '-c', parent], cwd=self.root, capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        time.sleep(.6)
+        self.assertFalse((self.root / 'late-side-effect').exists())
