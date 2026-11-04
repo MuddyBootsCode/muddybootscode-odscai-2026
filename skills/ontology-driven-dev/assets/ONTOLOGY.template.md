@@ -75,6 +75,25 @@ What this system deliberately does not do. The section that stops scope creep.
 - Surface rights and surface leases.
 - Permitting workflow with the state regulator.
 
+## Rule sources and authority
+
+Examples above illustrate format, not confirmed rules for your project. Record each
+important rule's source and status. Use `(inferred)` for observations from code;
+`[confirmed: name YYYY-MM-DD]` only after attributable confirmation. Put disputed
+claims and their sources under Disagreements. A gate does not establish authority.
+
+## Open questions
+
+Optional: include only unresolved decisions affecting behavior. For each question,
+record the related rule, source/trigger, who can answer, and whether it blocks work
+or which provisional behavior is permitted. Move answers to Changelog with provenance.
+
+## Review and verification
+
+An ontology edit acknowledges review; it does not prove the invariant still holds.
+Run a relevant acceptance command with ontology_verify.py and retain actual output.
+Missing/stale evidence is not a pass. Domain confirmation is a separate decision.
+
 ## Changelog
 
 One line per change to this file, newest first. Reference the commit or ticket.

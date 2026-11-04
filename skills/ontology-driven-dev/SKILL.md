@@ -8,7 +8,24 @@ compatibility: Claude Code (hooks), any agent that can run Python 3 scripts. Git
 
 The model doesn't need to remember the past. It needs to know where it is.
 
-This skill gives a repo a written ontology — entities, relationships, invariants, vocabulary, intent, scope — that the model reads before it writes code, can query mid-task, and cannot drift away from without a hook stopping it. It is the method behind "give the model an ontology of the problem, not a memory of the past."
+This skill gives a repo a written ontology — entities, relationships, invariants, vocabulary, intent, scope — that the model reads before it writes code, can query mid-task, and receives change-review feedback when governed definitions move. It is the method behind "give the model an ontology of the problem, not a memory of the past."
+
+## Authority, open questions, and evidence
+
+Read [references/review-and-verification.md](references/review-and-verification.md) when discovering rules, resolving uncertainty, or reporting
+verification. Keep domain confirmation, change acknowledgment, and executable
+evidence separate. Record attributable sources; leave unsupported rules inferred.
+The developer leads discovery and may supply domain expertise directly. New projects
+can start with provisional rules and acceptance cases before code or gates exist.
+
+Keep **Open questions** for specific unresolved decisions that affect behavior:
+name the rule, question, source, answerer, and blocking/provisional impact. Do not
+invent questions or confirmation. Reassess affected rules when new evidence arrives.
+
+Run `ontology_verify.py --rule 'unique invariant text' -- COMMAND ARGS...` to record
+an explicit acceptance check. Select a relevant command; never execute gate annotation
+text automatically. Report actual evidence status and output separately from review.
+A passing command verifies only that selected check on its recorded snapshot.
 
 ## Layout this skill expects
 
@@ -23,7 +40,7 @@ This skill gives a repo a written ontology — entities, relationships, invarian
 └── .git/hooks/pre-commit         # optional git-side gate
 ```
 
-If the repo gitignores `.claude/` (common; often only `.claude/hooks/` is tracked), put the three Python scripts under a tracked path such as `ontology/scripts/` and point `settings.json` and the git hooks there. The scripts depend only on each other and on the working directory, so they run from any folder. Git hooks and CI need the checker in a clean checkout; without it they print "checker not on this branch, skipped" and fail open.
+If the repo gitignores `.claude/` (common; often only `.claude/hooks/` is tracked), copy all Python modules and the function-mapper script from `scripts/` under a tracked path such as `ontology/scripts/` and point `settings.json` and the git hooks there. Keep `ontology_check.py`, `ontology_lib.py`, `ontology_signals.py`, `ontology_query.py`, `ontology_evidence.py`, `ontology_verify.py`, and `changed_functions.mjs` together; they depend on each other and on the working directory, so they run from any folder. Git hooks and CI need the checker in a clean checkout; without it they print "checker not on this branch, skipped" and fail open.
 
 Scripts in `scripts/`:
 

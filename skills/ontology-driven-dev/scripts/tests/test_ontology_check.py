@@ -454,3 +454,45 @@ class FrontMatterComments(Repo):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class UnavailableComparison(Repo):
+    def assert_unavailable(self, *args):
+        result = check(self.root, '--changed', *args)
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('Cannot compare', result.stderr)
+        self.assertEqual(state(self.root)[-1]['review'], 'unavailable')
+
+    def test_missing_base_is_not_a_clean_diff(self):
+        self.assert_unavailable('--base', 'missing-branch')
+
+    def test_corrupt_index_is_not_a_clean_diff(self):
+        (self.root / '.git/index').write_bytes(b'broken')
+        self.assert_unavailable()
+
+    def test_unborn_head_is_not_a_clean_staged_diff(self):
+        git(self.root, 'update-ref', '-d', 'HEAD')
+        self.assert_unavailable('--staged')
+
+    def test_non_repository_is_not_a_clean_diff(self):
+        import shutil
+        shutil.rmtree(self.root / '.git')
+        self.assert_unavailable()
+
+
+class TypeChanges(Repo):
+    def test_governed_type_change_is_not_an_empty_diff(self):
+        path = self.root / 'src/types.ts'
+        path.unlink()
+        path.symlink_to('../README.md')
+        result = check(self.root, '--changed')
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_unmerged_index_is_unavailable_even_with_ontology_acknowledgment(self):
+        blob = git(self.root, 'rev-parse', 'HEAD:src/types.ts').strip()
+        subprocess.run(['git', 'update-index', '--index-info'], cwd=self.root,
+                       input=f'0 {"0" * 40}\tsrc/types.ts\n100644 {blob} 1\tsrc/types.ts\n100644 {blob} 2\tsrc/types.ts\n100644 {blob} 3\tsrc/types.ts\n',
+                       text=True, check=True, capture_output=True)
+        result = check(self.root, '--changed')
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(state(self.root)[-1]['review'], 'unavailable')

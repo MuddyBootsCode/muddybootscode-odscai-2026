@@ -11,7 +11,7 @@ Requires Git, Python 3.10+ available as `python3`, and a Codex release with
 plugins and lifecycle hooks. The CLI commands below were checked against
 Codex CLI 0.159.2. macOS/Linux are the initial target; Windows is unverified.
 
-From a shell, after this change is merged:
+From a shell, for the published release:
 
 ```bash
 codex plugin marketplace add MuddyBootsCode/muddybootscode-odscai-2026
@@ -21,7 +21,7 @@ codex plugin add ontology-driven-dev@muddybootscode-odscai-2026
 To try the development branch before merge:
 
 ```bash
-codex plugin marketplace add MuddyBootsCode/muddybootscode-odscai-2026 --ref codex/ontology-plugin
+codex plugin marketplace add MuddyBootsCode/muddybootscode-odscai-2026 --ref codex/ontology-review-evidence
 codex plugin add ontology-driven-dev@muddybootscode-odscai-2026
 ```
 
@@ -45,7 +45,7 @@ For an existing ontology: **“Check my changes against the project ontology.”
 | Event | Behavior |
 | --- | --- |
 | Session start/resume/compaction | Validate and load the target project's ontology summary. |
-| After patch or shell tools | Validate and recheck the working-tree diff; send findings as context. |
+| After patch or shell tools | Validate and recheck the working-tree diff; surface findings as direct warnings and context. |
 | End of turn | Request one corrective continuation for a failing check. If still unresolved on the repeated Stop, show a warning and let the turn end. |
 
 Projects without an `ontology/` directory are left alone. Change comparison
@@ -79,8 +79,8 @@ prevent them from checking. Required CI or release policy is a separate setup.
 Use tracked copies of the shared checker scripts for CI, not the plugin cache.
 
 The `/ontology` pane in `hooks/register.tsx` imports the Claude Code UI runtime.
-It is not loaded in Codex. A persistent Codex visual dashboard would need its own
-UI integration. This version reports findings in the conversation.
+It is not loaded in Codex. The browser observer below provides a separate local dashboard; it is not an
+embedded Codex pane.
 
 ## Development checks
 
@@ -104,3 +104,70 @@ and resources stay at `skills/ontology-driven-dev/` and ship in the same bundle.
 Sources checked October 25, 2026:
 [plugin packaging](https://developers.openai.com/plugins/build/plugins) and
 [Codex hooks](https://learn.chatgpt.com/docs/hooks).
+
+## Review and executable evidence
+
+The change checker now records `review` independently from per-rule `verification`.
+A relevant ontology acknowledgment does not mark a test passed. Record an explicit
+acceptance command with the shared `ontology_verify.py --rule 'unique rule text' --
+COMMAND ARGS...` runner. In Codex set `ONTOLOGY_STATE` to the absolute target
+`.codex/ontology-state.jsonl`; ignore it and `.codex/ontology-state.evidence/`.
+Evidence includes the command, exit status, output and source fingerprint. Changed
+source or tests invalidate it. CI must run its own acceptance tests; the review
+check's exit status alone does not enforce verification. See the shared
+[workflow reference](../skills/ontology-driven-dev/references/review-and-verification.md).
+
+Unavailable Git comparisons fail explicitly in the shared checker, including
+missing HEAD, invalid merge bases and failed enumeration. No clean verdict is
+available until the comparison works.
+
+## Live browser observer
+
+Start the observer from your plugin checkout (Python standard library only):
+
+```bash
+python3 codex/scripts/ontology_observer.py --root /absolute/path/to/project --open
+```
+
+It opens a token-bearing loopback launch link and refreshes every three seconds.
+Keep the process running. Use `--state /absolute/path/to/ontology-state.jsonl` when
+hooks or manual checks use a custom state path. The default is the target project's
+`.codex/ontology-state.jsonl`. Ignore the state file and its `.evidence/` sibling.
+
+Cards distinguish **Passed**, **Failed**, **Stale**, **Not run**, and **Unable to
+check** (including interrupted runs). Each card shows the rule, its confirmation
+status, governed files, command, output and last output time. Source edits invalidate
+old results. Lost connections visibly mark the display outdated. **Copy fix request**
+places the rule and output on your clipboard for pasting into the appropriate chat;
+it does not send a message automatically. Hook failures also emit `systemMessage`
+warnings without depending on the agent's narration; host rendering can vary.
+
+To enable **Run check**, add an explicit, reviewed argv list for each selected rule
+to the project's `ontology/checks.json`. Domain and rule text must match exactly:
+
+```json
+{
+  "checks": [
+    {
+      "domain": "orders",
+      "rule": "An Order must have at least one Item.",
+      "command": ["python3", "-m", "pytest", "tests/test_orders.py", "-q"]
+    }
+  ]
+}
+```
+
+Commands execute from the target repository root, without shell expansion, only
+when clicked. Review **Command and evidence** before running a newly added command.
+The browser cannot supply arbitrary commands; the server validates the current
+configuration and allows one check at a time. A missing or invalid configuration
+disables running. Gate annotations are never executed. Keep the launch link private;
+the service binds only to `127.0.0.1` and checks its token, Host and Origin.
+
+This observes configured acceptance checks, not every possible test in your project.
+Ignored dependency changes, external systems and environment changes are outside
+the source fingerprint: rerun checks when those change. A local command has your
+normal filesystem/network permissions; use only trusted repositories and commands.
+
+Rendered disposable fixture: [failed check with output](observer/screenshots/failed.png)
+and [repaired check after reload](observer/screenshots/repaired.png).
