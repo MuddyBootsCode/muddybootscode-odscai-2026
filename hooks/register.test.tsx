@@ -591,3 +591,38 @@ test('without the runner anywhere the prompt says so instead of naming a missing
   expect(text).not.toMatch(/python3 \S*ontology_verify\.py/)
   await ui.unmount()
 })
+
+test('an edit after the last end-of-turn check turns its passes stale until the next check', async ($, on) => {
+  const status: string[] = []
+  const file = { text: '' }
+  const passed = { ts: '2026-11-04T13:00:00-0500', mode: 'changed', exit: 0, tier: 'none', files: [], domains: [],
+    ontology_changed: false, skip: null, base: null, staged: false, message: '', review: 'not_required',
+    verification: [{ domain: 'demo', rule: 'Every Item has a price.', status: 'passed', command: ['pytest', 'tests/test_price.py', '-q'], exit: 0, output: '/repo/.claude/ontology-state.evidence/2.log' }] }
+  // an edit outside every governed path still changes the fingerprint
+  const edited = { ts: '2026-11-04T13:01:00-0500', mode: 'touched', exit: 0, tier: 'none', files: [], domains: [], message: '' }
+  engine(on, status, file, ONTOLOGY)
+  await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
+
+  file.text = JSON.stringify(passed) + '\n'
+  await $.classic.Stop({ stop_hook_active: false })
+  const before = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect(await before.find({ type: 'Text', text: /^✓ Every Item has a price/ })).toBeDefined()
+  expect(await before.find({ type: 'Button', text: /Verify Every Item has a price/ })).toBeUndefined()
+  await before.unmount()
+
+  file.text += JSON.stringify(edited) + '\n'
+  await $.classic.PostToolUse({ tool_name: 'Edit', tool_input: { file_path: 'README.md' }, tool_response: {}, tool_use_id: 't1' })
+  const after = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect(await after.find({ type: 'Text', text: /^✓ Every Item has a price/ })).toBeUndefined()
+  expect((await after.find({ type: 'Text', text: /^▲ Every Item has a price/ }))?.text).toMatch(/stale/)
+  expect(await after.find({ type: 'Text', text: /0 of 1 passed: 1 stale/ })).toBeDefined()
+  expect(await after.find({ type: 'Button', text: /Verify Every Item has a price/ })).toBeDefined()
+  await after.unmount()
+
+  // the next end-of-turn check is the word on it again
+  file.text += JSON.stringify({ ...passed, ts: '2026-11-04T13:02:00-0500' }) + '\n'
+  await $.classic.Stop({ stop_hook_active: false })
+  const again = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect(await again.find({ type: 'Text', text: /^✓ Every Item has a price/ })).toBeDefined()
+  await again.unmount()
+})

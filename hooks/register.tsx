@@ -538,9 +538,18 @@ function issues(list: StateRecord[], doms: Domain[], logs: Record<string, string
   return out.sort((a, b) => (a.level === b.level ? 0 : a.level === 'error' ? -1 : 1))
 }
 
-// Each rule's recorded acceptance check, as the newest end-of-turn or commit check saw it.
+// Each rule's recorded acceptance check, as the newest end-of-turn or commit check saw it. An
+// edit since then changed the fingerprint, so a pass it reported is stale until the next check.
 function evidence(list: StateRecord[]): Verification[] {
-  return [...list].reverse().find(r => r.mode === 'changed')?.verification ?? []
+  let at = -1
+  list.forEach((r, i) => {
+    if (r.mode === 'changed') at = i
+  })
+  if (at === -1) return []
+  const checks = list[at]?.verification ?? []
+  const editedSince = list.slice(at + 1).some(r => r.mode === 'touched')
+  if (!editedSince) return checks
+  return checks.map(v => (v.status === 'passed' || v.status === 'worktree_only' ? { ...v, status: 'stale' } : v))
 }
 
 const EVIDENCE_LABEL: Record<string, string> = {
