@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { Domain, Invariant, Pressed, Relationship, Signal, StateFile, StateRecord, View, RuleRun } from '../types'
+import type { Domain, Invariant, Pressed, Relationship, Signal, StateFile, StateRecord, Verification, View } from '../types'
 
 const PANE = 'ontology'
 const STATE = '.claude/ontology-state.jsonl'
@@ -15,6 +15,9 @@ const view = atom({ plugin: 'ontology-observer', key: 'view' } as const, {})
 const DEFAULT_VIEW: View = { rules: 'risk', relationships: false, diff: false }
 const showLeft = atom({ plugin: 'ontology-observer', key: 'showLeft' } as const, false)
 const openGroups = atom({ plugin: 'ontology-observer', key: 'openGroups' } as const, [])
+// The tail of each failed check's log, by the log's path: read once per refresh.
+const outputs = atom({ plugin: 'ontology-observer', key: 'outputs' } as const, {})
+const OUTPUT_TAIL = 1500
 const LEFT_KEY = 'left'
 
 // ---------- the state record ----------
@@ -475,7 +478,7 @@ function gateIssues(files: StateFile[], doms: Domain[], blocked: boolean): Issue
   )
 }
 
-function issues(list: StateRecord[], doms: Domain[]): Issue[] {
+function issues(list: StateRecord[], doms: Domain[], logs: Record<string, string> = {}): Issue[] {
   const out: Issue[] = []
   const edit = editStillOpen(list)
   if (edit) {
@@ -526,43 +529,80 @@ function issues(list: StateRecord[], doms: Domain[]): Issue[] {
     )
     out.push({ id: `validate:${hash(line)}`, level, title, rules: [], fix, explore })
   }
-  for (const rule of ruleRuns(list)) {
-    if (rule.status === 'pass') continue
-    const where = `ontology/${rule.domain}.md`
-    const tests = rule.tests.join(', ')
-    const after = hitText(rule)
-    const output = rule.runs.find(r => r.status !== 'pass' && r.output)?.output?.trim()
-    const asRule: Rule = { text: rule.text, gate: tests || null, file: `${rule.domain}.md` }
-    const named = Object.keys(doms.find(d => d.file === `${rule.domain}.md`)?.entities ?? {}).filter(e => mentions(rule.text, e))
-    const failed = rule.status === 'fail'
-    const title = failed
-      ? `A rule's test fails after this change: ${plain(rule.text)}`
-      : `${plain(rule.text)}: its test did not run after ${after}.`
-    const fix = failed
-      ? `The test ${tests} for the rule "${plain(rule.text)}" (${where}) fails after ${after}.${output ? ` Output: ${output}` : ''} Make the code satisfy the rule again, or if the rule itself is wrong, change the rule in ${where} with a Changelog line. Run the test and confirm it passes.`
-      : `Run ${tests} and report whether the rule "${plain(rule.text)}" (${where}) still holds after ${after}. If it fails, make the code satisfy the rule again, or if the rule itself is wrong, change the rule in ${where} with a Changelog line.`
-    const explore = explorePrompt(
-      `The rule "${plain(rule.text)}" (${where}) is gated by ${tests}, which ${failed ? 'fails' : 'did not run'} after ${after}.`,
-      [asRule],
-      named.flatMap(e => disagreementsFor(doms, e))
-    )
-    out.push({ id: `rule:${rule.id}`, level: failed ? 'error' : 'warning', title, note: `${tests} after ${after}`, output: failed ? output : undefined, rules: [asRule], fix, explore })
-  }
+  out.push(...evidenceIssues(list, doms, logs))
   return out.sort((a, b) => (a.level === b.level ? 0 : a.level === 'error' ? -1 : 1))
 }
 
-// The rules whose own tests the checker reran after the last change, because the diff changed a
-// function those tests depend on.
-function ruleRuns(list: StateRecord[]): RuleRun[] {
-  return [...list].reverse().find(r => r.mode === 'changed')?.rules ?? []
+// Each rule's recorded acceptance check, as the newest end-of-turn or commit check saw it.
+function evidence(list: StateRecord[]): Verification[] {
+  return [...list].reverse().find(r => r.mode === 'changed')?.verification ?? []
 }
 
-/** "findItemsLargerThanOrder changed in fit.ts" */
-function hitText(rule: RuleRun): string {
-  const names = [...new Set(rule.hit.map(h => h.name))]
-  const files = [...new Set(rule.hit.map(h => base(h.file)))]
-  if (!names.length) return 'the change'
-  return `${names.join(', ')} changed in ${files.join(', ')}`
+const EVIDENCE_LABEL: Record<string, string> = {
+  passed: 'passed',
+  failed: 'failed',
+  stale: 'stale',
+  not_run: 'not run',
+  unavailable: 'could not run',
+  interrupted: 'could not run',
+  worktree_only: 'passed in the worktree, not what is staged',
+}
+
+function evidenceLabel(v: Verification): string {
+  return EVIDENCE_LABEL[v.status] ?? v.status
+}
+
+function couldNotRun(v: Verification): boolean {
+  return v.status === 'unavailable' || v.status === 'interrupted'
+}
+
+// The rule as the ontology file states it, or just its text when the file is not readable.
+function ruleOf(doms: Domain[], v: Verification): Rule {
+  const file = `${v.domain}.md`
+  const stored = doms.find(d => d.file === file)?.invariants.find(i => plain(i.text) === plain(v.rule))
+  return stored ? { ...stored, file } : { text: v.rule, gate: null, file }
+}
+
+function argv(command: string[] | undefined): string {
+  return command?.join(' ') ?? '<command>'
+}
+
+// The exact runner call: the rule's text in double quotes, so an apostrophe in it is no trouble.
+function verifyCommand(v: Verification): string {
+  return `python3 ontology/scripts/ontology_verify.py --rule "${v.rule}" -- ${argv(v.command)}`
+}
+
+function verifyPrompt(doms: Domain[], v: Verification): string {
+  const rule = ruleOf(doms, v)
+  const text = plain(v.rule)
+  const where = `ontology/${v.domain}.md`
+  const run = `Run ${verifyCommand(v)} from the repo root and report whether it records passed.`
+  if (v.status === 'stale') return `The evidence for the rule "${text}" (${where}) is stale: the repo changed after ${argv(v.command)} last ran. ${run}`
+  if (v.status === 'worktree_only') return `The rule "${text}" (${where}) passed in the worktree, but what is staged was never checked. Stage everything the check depends on, then ${run.charAt(0).toLowerCase()}${run.slice(1)}`
+  return `The rule "${text}" (${where}) has no recorded acceptance check.${rule.gate ? ` Its gate is ${plain(rule.gate)}.` : ' It has no gate: nothing in the code enforces it.'} Choose the test command that checks this rule (write it first if there is none), then ${run.charAt(0).toLowerCase()}${run.slice(1)}`
+}
+
+// A failed check is an error; one that could not run is a warning. The rest are rows, not issues.
+function evidenceIssues(list: StateRecord[], doms: Domain[], logs: Record<string, string>): Issue[] {
+  return evidence(list).filter(v => v.status === 'failed' || couldNotRun(v)).map(v => {
+    const rule = ruleOf(doms, v)
+    const text = plain(v.rule)
+    const where = `ontology/${v.domain}.md`
+    const cmd = argv(v.command)
+    const output = v.output ? logs[v.output]?.trim() : undefined
+    const named = Object.keys(doms.find(d => d.file === rule.file)?.entities ?? {}).filter(e => mentions(text, e))
+    const failed = v.status === 'failed'
+    const title = failed ? `A rule's acceptance check fails: ${text}` : `${text}: its acceptance check could not run.`
+    const fix = failed
+      ? `The acceptance check recorded for the rule "${text}" (${where}) failed${v.exit != null ? ` with exit ${v.exit}` : ''}: ${cmd}.${output ? ` Output:\n${output}\n` : ''} Make the code satisfy the rule again, or if the rule itself is wrong, change it in ${where} with a Changelog line. Then rerun ${verifyCommand(v)} and confirm it records passed.`
+      : `The acceptance check for the rule "${text}" (${where}) could not run: ${cmd}. The command was missing, timed out, was interrupted, or its log was lost. Find out why, then rerun ${verifyCommand(v)} and confirm it records passed.`
+    const explore = explorePrompt(
+      `The acceptance check ${cmd} for the rule "${text}" (${where}) ${failed ? 'fails' : 'could not run'}.${output ? ` Its output:\n${output}` : ''}`,
+      [rule],
+      named.flatMap(e => disagreementsFor(doms, e))
+    )
+    return { id: `check:${hash(v.domain + v.rule)}`, level: failed ? 'error' : 'warning', title, note: `ran: ${cmd}`, output: failed ? output : undefined, rules: [rule], fix, explore } as Issue
+  })
 }
 
 async function leftIds($: EngineInterface): Promise<string[]> {
@@ -615,9 +655,20 @@ async function refresh($: EngineInterface): Promise<void> {
   }
   const doms = await loadOntology($)
   const ids = await leftIds($)
+  const logs: Record<string, string> = {}
+  for (const v of evidence(list)) {
+    if (!v.output || !(v.status === 'failed' || couldNotRun(v))) continue
+    try {
+      const text = await $.fs.read(v.output)
+      logs[v.output] = text.length > OUTPUT_TAIL ? '…' + text.slice(-OUTPUT_TAIL) : text
+    } catch {
+      // a missing log is what unavailable means; the row says so
+    }
+  }
   await update($, records, () => list.slice(-500))
   await update($, ontology, () => doms)
   await update($, left, () => ids)
+  await update($, outputs, () => logs)
   $.ui.status(statusLine(list))
 }
 
@@ -666,13 +717,14 @@ export const register: Register = on => {
     const views = await read($, view)
     const leftShown = await read($, showLeft)
     const unfolded = await read($, openGroups)
+    const logs = await read($, outputs)
     const last = list.at(-1)
     const latest = new Map<Stage, StateRecord>()
     for (const r of list) {
       const s = stageOf(r)
       if (s) latest.set(s, r)
     }
-    const all = issues(list, doms)
+    const all = issues(list, doms, logs)
     const open = all.filter(i => !dismissed.includes(i.id))
     const leftCount = all.length - open.length
     const edits = latestEdits(list)
@@ -814,12 +866,21 @@ export const register: Register = on => {
     const toggleGroup = (key: string) =>
       void update($, openGroups, keys => (keys.includes(key) ? keys.filter(k => k !== key) : [...keys, key]))
 
-    // The rules whose tests the last change reran: the passes are drawn here, the rest are issues above.
-    const runs = ruleRuns(list)
-    const passed = runs.filter(r => r.status === 'pass')
-    const failedCount = runs.filter(r => r.status === 'fail').length
-    const unrunCount = runs.length - passed.length - failedCount
-    const runSummary = `${passed.length} of ${runs.length} pass after the last change${failedCount ? `, ${failedCount} fail` : ''}${unrunCount ? `, ${unrunCount} not run` : ''}`
+    // Every rule's recorded acceptance check: the failures are issues above, the rest are rows here.
+    const checks = evidence(list)
+    const count = (f: (v: Verification) => boolean) => checks.filter(f).length
+    const passedCount = count(v => v.status === 'passed')
+    const tally = [
+      [count(v => v.status === 'failed'), 'failed'],
+      [count(v => v.status === 'stale'), 'stale'],
+      [count(v => v.status === 'not_run'), 'not run'],
+      [count(couldNotRun), 'could not run'],
+      [count(v => v.status === 'worktree_only'), 'passed in the worktree only'],
+    ].filter(([n]) => n).map(([n, word]) => `${n} ${word}`)
+    const checkSummary = `${passedCount} of ${checks.length} passed${tally.length ? `: ${tally.join(', ')}` : ''}`
+    const mark = (v: Verification) => (v.status === 'passed' ? '✓' : v.status === 'failed' || couldNotRun(v) ? '✗' : v.status === 'not_run' ? '·' : '▲')
+    const tone = (v: Verification) => (v.status === 'passed' ? 'green' : v.status === 'failed' || couldNotRun(v) ? 'red' : v.status === 'not_run' ? undefined : 'yellow')
+    const verifyId = (v: Verification) => `verify:${hash(v.domain + v.rule)}`
 
     // Issues the person left alone: listed on request, each with a way back.
     const leftIssues = all.filter(i => dismissed.includes(i.id))
@@ -850,7 +911,8 @@ export const register: Register = on => {
                   {issue.note && <Text color="yellow" wrap="wrap">{issue.note}</Text>}
                   {issue.output && <Text color="red" wrap="wrap">{issue.output}</Text>}
                   {issue.rules.length > 0 && issue.id.startsWith('gate:') && <Text dimColor>the rule this code enforces</Text>}
-                  {issue.rules.length > 0 && !issue.id.startsWith('rule:') && !issue.id.startsWith('gate:') && <Text dimColor>rules at risk: they name what changed</Text>}
+                  {issue.rules.length > 0 && issue.id.startsWith('check:') && <Text dimColor>the rule this check covers</Text>}
+                  {issue.rules.length > 0 && issue.id.startsWith('edit:') && <Text dimColor>rules at risk: they name what changed</Text>}
                   {issue.rules.map(r => ruleBlock(r, true, false))}
                 </Box>
               )}
@@ -879,16 +941,22 @@ export const register: Register = on => {
             </Box>
           )
         })}
-        {runs.length > 0 && (
+        {checks.length > 0 && (
           <Box flexDirection="column" borderStyle="round" borderDimColor paddingX={1} marginTop={1}>
             <Box flexDirection="row" gap={1}>
-              <Text bold dimColor>RULES RUN</Text>
-              <Text dimColor>{runSummary}</Text>
+              <Text bold dimColor>VERIFIED</Text>
+              <Text dimColor>{checkSummary}</Text>
             </Box>
-            {passed.map(r => (
-              <Box flexDirection="column">
-                <Text color="green" wrap="wrap">✓ {plain(r.text)}</Text>
-                <Text dimColor wrap="wrap">  {r.tests.join(', ')} after {hitText(r)}</Text>
+            {checks.map(v => (
+              <Box flexDirection="row" gap={1}>
+                <Text color={tone(v)} dimColor={v.status === 'not_run'} wrap="wrap">{mark(v)} {plain(v.rule)}{v.status === 'passed' ? '' : `  ${evidenceLabel(v)}`}</Text>
+                {v.status !== 'passed' && v.status !== 'failed' && !couldNotRun(v) && (
+                  inChat[verifyId(v)] ? (
+                    <Text dimColor italic>Verifying in chat…</Text>
+                  ) : (
+                    <Button key={verifyId(v)} label={`Verify ${plain(v.rule)}`} onPress={() => void act(verifyId(v), 'fixing', verifyPrompt(doms, v))} />
+                  )
+                )}
               </Box>
             ))}
           </Box>

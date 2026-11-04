@@ -83,7 +83,7 @@ Dates
 
 const DIFF = '--- ItemRecord\n+++ ItemRecord\n@@ -2,3 +2,4 @@\n   id: string;\n   price: number;\n+  weight: number;\n }'
 
-function engine(on: Parameters<Body>[1], status: string[], file: { text: string | null }, ontology: string | null = null, submitted: string[] = []) {
+function engine(on: Parameters<Body>[1], status: string[], file: { text: string | null }, ontology: string | null = null, submitted: string[] = [], logs: Record<string, string> = {}) {
   mock.store(on)
   on('prompt.submit', (_, e) => {
     submitted.push(e.text)
@@ -108,6 +108,11 @@ function engine(on: Parameters<Body>[1], status: string[], file: { text: string 
     ] }
   })
   on('fs.read', (_, e) => {
+    if (e.path.endsWith('.log')) {
+      const log = logs[e.path]
+      if (log === undefined) throw new Error('ENOENT')
+      return { value: log }
+    }
     if (e.path.endsWith('.md')) {
       if (ontology === null || e.path.endsWith('README.md')) throw new Error('ENOENT')
       return { value: ontology }
@@ -402,38 +407,6 @@ test('every rule is on the pane, grouped as the file groups them, unfolding on r
   await ui.unmount()
 })
 
-test('a change reruns the tests of the rules it touches: pass is CLEAN, fail is ERROR with the output, unrun is WARNING', async ($, on) => {
-  const status: string[] = []
-  const rec = { ts: '2026-10-24T11:40:00-0500', mode: 'changed', exit: 2, staged: true, files: [], domains: ['demo'],
-    changed_functions: { 'src/fit.ts': ['findItemsLargerThanOrder'] },
-    rules: [
-      { id: 'an-order-is-larger', text: 'An Order is larger than any Item in it.', domain: 'demo', status: 'fail',
-        tests: ['orderItemFit.test.ts'], hit: [{ file: 'src/fit.ts', name: 'findItemsLargerThanOrder' }],
-        runs: [{ test: 'orderItemFit.test.ts', status: 'fail', output: 'AssertionError: expected [] to have length 1' }] },
-      { id: 'every-item-has-a-price', text: 'Every Item has a price.', domain: 'demo', status: 'pass',
-        tests: ['itemPrice.test.ts'], hit: [{ file: 'src/fit.ts', name: 'findItemsLargerThanOrder' }],
-        runs: [{ test: 'itemPrice.test.ts', status: 'pass' }] },
-      { id: 'an-order-has-a-date', text: 'An Order has a date.', domain: 'demo', status: 'unrun',
-        tests: ['orderDate.test.ts'], hit: [{ file: 'src/fit.ts', name: 'findItemsLargerThanOrder' }], runs: [] },
-    ],
-    message: "A rule's test fails after this change: An Order is larger than any Item in it." }
-  engine(on, status, { text: JSON.stringify(rec) + '\n' }, ONTOLOGY)
-  await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
-  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
-  // the failing rule is an ERROR issue: the sentence, the test, the function that linked it, and the test's output
-  expect((await ui.find({ type: 'Text', text: /fails after this change/ }))?.text).toMatch(/An Order is larger than any Item in it/)
-  expect((await ui.find({ type: 'Text', text: /AssertionError: expected \[\] to have length 1/ }))).toBeDefined()
-  expect((await ui.find({ type: 'Text', text: /orderItemFit\.test\.ts.*findItemsLargerThanOrder/ }))).toBeDefined()
-  expect(await ui.find({ type: 'Button', text: /^Fix it$/ })).toBeDefined()
-  // the rule whose test did not run is a WARNING
-  expect((await ui.find({ type: 'Text', text: /did not run/ }))?.text).toMatch(/An Order has a date/)
-  // the rule whose test passed is CLEAN: a tick line under a header that counts
-  expect((await ui.find({ type: 'Text', text: /^RULES RUN/ }))).toBeDefined()
-  expect((await ui.find({ type: 'Text', text: /1 of 3 pass/ }))).toBeDefined()
-  expect((await ui.find({ type: 'Text', text: /^✓ Every Item has a price/ }))).toBeDefined()
-  await ui.unmount()
-})
-
 test('an edit to a rule\'s gate file is an issue box naming the rule, with fix, explore and leave', async ($, on) => {
   const status: string[] = []
   const submitted: string[] = []
@@ -497,5 +470,81 @@ test('a rule gated by another function of the changed file says which function c
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
   expect(await ui.find({ type: 'Text', text: /fit\.ts › findItemsLargerThanOrder, line 75 changed/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /findItemsLargerThanOrder changed, not priceOf, which this rule's gate names\. Check whether priceOf calls it\./ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('the end-of-turn check carries each rule\'s acceptance evidence: failed is ERROR with the output, unavailable is WARNING, the rest are rows', async ($, on) => {
+  const status: string[] = []
+  const submitted: string[] = []
+  const rec = { ts: '2026-11-04T11:40:00-0500', mode: 'changed', exit: 0, tier: 'none', files: [], domains: [],
+    ontology_changed: false, skip: null, base: null, staged: false, message: '', review: 'not_required',
+    verification: [
+      { domain: 'demo', rule: 'An Order is larger than any Item in it.', status: 'failed', command: ['python3', '-m', 'pytest', 'tests/test_fit.py', '-q'], exit: 1, output: '/repo/.claude/ontology-state.evidence/1.log' },
+      { domain: 'demo', rule: 'Every Item has a price.', status: 'passed', command: ['python3', '-m', 'pytest', 'tests/test_price.py', '-q'], exit: 0, output: '/repo/.claude/ontology-state.evidence/2.log' },
+      { domain: 'demo', rule: 'An Order has a date.', status: 'stale', command: ['python3', '-m', 'pytest', 'tests/test_date.py', '-q'], exit: 0, output: '/repo/.claude/ontology-state.evidence/3.log' },
+      { domain: 'demo', rule: "A Item's `weight` is positive.", status: 'not_run' },
+      { domain: 'demo', rule: 'Start is before end.', status: 'unavailable', command: ['/missing/command'], exit: null, output: '/repo/.claude/ontology-state.evidence/5.log' },
+    ] }
+  const logs = { '/repo/.claude/ontology-state.evidence/1.log': 'FAILED tests/test_fit.py::test_order_larger - AssertionError: expected [] to have length 1\n1 failed in 0.1s\n' }
+  engine(on, status, { text: JSON.stringify(rec) + '\n' }, ONTOLOGY, submitted, logs)
+  on('turn.complete', (_, e) => ({ text: e.answer }))
+  await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
+
+  for (const surface of ['terminal', 'desktop'] as const) {
+    const ui = await $.ui.mount({ ...PANE, surface })
+    // the failed check is an ERROR issue: the rule, the command that ran, and the output it left
+    expect((await ui.find({ type: 'Text', text: /acceptance check fails/ }))?.text).toMatch(/An Order is larger than any Item in it/)
+    expect(await ui.find({ type: 'Text', text: /^ERROR$/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /python3 -m pytest tests\/test_fit\.py -q/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /AssertionError: expected \[\] to have length 1/ })).toBeDefined()
+    // a check that could not run is a WARNING, not a pass
+    expect((await ui.find({ type: 'Text', text: /could not run/ }))?.text).toMatch(/Start is before end/)
+    // stale and not-run rules are rows under VERIFIED, not issue boxes
+    expect(await ui.find({ type: 'Text', text: /acceptance check.*An Order has a date/ })).toBeUndefined()
+    expect(await ui.find({ type: 'Text', text: /^VERIFIED/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /1 of 5 passed: 1 failed, 1 stale, 1 not run, 1 could not run/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /^✓ Every Item has a price/ })).toBeDefined()
+    expect((await ui.find({ type: 'Text', text: /^▲ An Order has a date/ }))?.text).toMatch(/stale/)
+    expect((await ui.find({ type: 'Text', text: /^· A Item's weight is positive/ }))?.text).toMatch(/not run/)
+    // the status line still reports the review gate, not the evidence
+    expect(status.at(-1)).toMatch(/ontology: passed/)
+    await ui.unmount()
+  }
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  // Fix it on the failed check: the rule, the output, and the exact command to rerun
+  const fix = await ui.find({ type: 'Button', text: /Fix it/ })
+  await $.ui.press({ plugin: 'ontology-observer', key: fix!.key!, requestId: 'ontology', surface: 'desktop' })
+  const fixText = submitted.at(-1) ?? ''
+  expect(fixText).toMatch(/An Order is larger than any Item in it\./)
+  expect(fixText).toMatch(/AssertionError: expected \[\] to have length 1/)
+  expect(fixText).toMatch(/ontology_verify\.py --rule "An Order is larger than any Item in it\." -- python3 -m pytest tests\/test_fit\.py -q/)
+  await $.turn.complete({ reason: 'answer', answer: 'done', durationMs: 1, isAborted: false, turnId: 't1' })
+
+  // Verify on a stale row reruns the command it recorded
+  const stale = await ui.find({ type: 'Button', text: /Verify An Order has a date/ })
+  await $.ui.press({ plugin: 'ontology-observer', key: stale!.key!, requestId: 'ontology', surface: 'desktop' })
+  expect(submitted.at(-1)).toMatch(/ontology_verify\.py --rule "An Order has a date\." -- python3 -m pytest tests\/test_date\.py -q/)
+  await $.turn.complete({ reason: 'answer', answer: 'done', durationMs: 1, isAborted: false, turnId: 't2' })
+
+  // Verify on a never-run rule asks for a command to be chosen, naming the rule and that it has no gate
+  const fresh = await ui.find({ type: 'Button', text: /Verify A Item's weight is positive/ })
+  await $.ui.press({ plugin: 'ontology-observer', key: fresh!.key!, requestId: 'ontology', surface: 'desktop' })
+  const freshText = submitted.at(-1) ?? ''
+  expect(freshText).toMatch(/A Item's weight is positive\./)
+  expect(freshText).toMatch(/no gate/)
+  expect(freshText).toMatch(/ontology_verify\.py --rule "A Item's `weight` is positive\." -- <command>/)
+  // a passed row has nothing to press
+  expect(await ui.find({ type: 'Button', text: /Verify Every Item has a price/ })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('a record without verification draws no VERIFIED section', async ($, on) => {
+  const status: string[] = []
+  engine(on, status, { text: TEXT }, ONTOLOGY)
+  await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect(await ui.find({ type: 'Text', text: /^VERIFIED/ })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: /acceptance check/ })).toBeUndefined()
   await ui.unmount()
 })
