@@ -72,6 +72,6 @@ export type Domain = {
 
 declare module 'claude-code' {
   interface PluginState {
-    'ontology-observer': { records: StateRecord[]; ontology: Domain[]; left: string[]; pressed: Record<string, Pressed>; view: Record<string, View>; showLeft: boolean; openGroups: string[]; outputs: Record<string, string>; scripts: string | null; editMark: number | null }
+    'ontology-observer': { records: StateRecord[]; ontology: Domain[]; left: string[]; pressed: Record<string, Pressed>; view: Record<string, View>; showLeft: boolean; openGroups: string[]; outputs: Record<string, string>; scripts: string | null; editMark: string | null }
   }
 }

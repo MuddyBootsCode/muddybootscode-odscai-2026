@@ -7,6 +7,8 @@ const PANE = 'ontology'
 const STATE = '.claude/ontology-state.jsonl'
 const ONTOLOGY_DIR = 'ontology'
 const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit'])
+// A shell command can change any file too; the checker's hooks do not run for it.
+const CHANGING_TOOLS = new Set([...EDIT_TOOLS, 'Bash'])
 const records = atom({ plugin: 'ontology-observer', key: 'records' } as const, [])
 const ontology = atom({ plugin: 'ontology-observer', key: 'ontology' } as const, [])
 const left = atom({ plugin: 'ontology-observer', key: 'left' } as const, [])
@@ -23,10 +25,10 @@ const OUTPUT_TAIL = 1500
 const scripts = atom({ plugin: 'ontology-observer', key: 'scripts' } as const, null)
 const SCRIPT_DIRS = ['ontology/scripts', '.claude/skills/ontology-driven-dev/scripts']
 const RUNNER = 'ontology_verify.py'
-// How many end-of-turn checks the state held when this session last edited a file. While the
-// count is still the same, the fingerprint has moved and no check has looked since: passes are
-// stale. The per-edit check writes no record for an ungoverned or ontology file, so the pane
-// keeps this mark itself.
+// The end-of-turn check that was newest when this session last changed a file, by its
+// timestamp. While it is still the newest, the fingerprint has moved and no check has looked
+// since: passes are stale. The per-edit check writes no record for an ungoverned or ontology
+// file, and none at all for a shell command, so the pane keeps this mark itself.
 const editMark = atom({ plugin: 'ontology-observer', key: 'editMark' } as const, null)
 const LEFT_KEY = 'left'
 
@@ -488,7 +490,7 @@ function gateIssues(files: StateFile[], doms: Domain[], blocked: boolean): Issue
   )
 }
 
-function issues(list: StateRecord[], doms: Domain[], logs: Record<string, string> = {}, dir: string | null = null, mark: number | null = null): Issue[] {
+function issues(list: StateRecord[], doms: Domain[], logs: Record<string, string> = {}, dir: string | null = null, mark: string | null = null): Issue[] {
   const out: Issue[] = []
   const edit = editStillOpen(list)
   if (edit) {
@@ -545,18 +547,20 @@ function issues(list: StateRecord[], doms: Domain[], logs: Record<string, string
 
 // Each rule's recorded acceptance check, as the newest end-of-turn or commit check saw it. An
 // edit since then changed the fingerprint, so a pass it reported is stale until the next check.
-function checkCount(list: StateRecord[]): number {
-  return list.filter(r => r.mode === 'changed').length
+// The newest end-of-turn check's timestamp, or '' before any: an identity the pane keeps
+// across the window it retains, where a count would not.
+function lastCheck(list: StateRecord[]): string {
+  return [...list].reverse().find(r => r.mode === 'changed')?.ts ?? ''
 }
 
-function evidence(list: StateRecord[], mark: number | null = null): Verification[] {
+function evidence(list: StateRecord[], mark: string | null = null): Verification[] {
   let at = -1
   list.forEach((r, i) => {
     if (r.mode === 'changed') at = i
   })
   if (at === -1) return []
   const checks = list[at]?.verification ?? []
-  const editedSince = list.slice(at + 1).some(r => r.mode === 'touched') || mark === checkCount(list)
+  const editedSince = list.slice(at + 1).some(r => r.mode === 'touched') || mark === lastCheck(list)
   if (!editedSince) return checks
   return checks.map(v => (v.status === 'passed' || v.status === 'worktree_only' ? { ...v, status: 'stale' } : v))
 }
@@ -622,7 +626,7 @@ function verifyPrompt(doms: Domain[], v: Verification, dir: string | null): stri
 }
 
 // A failed check is an error; one that could not run is a warning. The rest are rows, not issues.
-function evidenceIssues(list: StateRecord[], doms: Domain[], logs: Record<string, string>, dir: string | null, mark: number | null): Issue[] {
+function evidenceIssues(list: StateRecord[], doms: Domain[], logs: Record<string, string>, dir: string | null, mark: string | null): Issue[] {
   return evidence(list, mark).filter(v => v.status === 'failed' || couldNotRun(v)).map(v => {
     const rule = ruleOf(doms, v)
     const text = plain(v.rule)
@@ -743,10 +747,10 @@ export const register: Register = on => {
   // The settings hooks run beneath: once next(e) settles the checker has written its record.
   on('classic.PostToolUse', async ($, e, next) => {
     const ran = await next(e)
-    if (EDIT_TOOLS.has(e.tool_name)) {
+    if (CHANGING_TOOLS.has(e.tool_name)) {
       await refresh($)
       const list = await read($, records)
-      await update($, editMark, () => checkCount(list))
+      await update($, editMark, () => lastCheck(list))
     }
     return ran
   }).catch(($, e, next) => next(e))

@@ -641,3 +641,35 @@ test('an edit after the last end-of-turn check turns its passes stale until the 
   expect(await read.find({ type: 'Text', text: /^✓ Every Item has a price/ })).toBeDefined()
   await read.unmount()
 })
+
+test('a shell command counts as an edit, and the mark survives history truncation', async ($, on) => {
+  const status: string[] = []
+  const file = { text: '' }
+  const passed = (ts: string) => ({ ts, mode: 'changed', exit: 0, tier: 'none', files: [], domains: [],
+    ontology_changed: false, skip: null, base: null, staged: false, message: '', review: 'not_required',
+    verification: [{ domain: 'demo', rule: 'Every Item has a price.', status: 'passed', command: ['pytest', '-q'], exit: 0, output: '/repo/.claude/ontology-state.evidence/2.log' }] })
+  engine(on, status, file, ONTOLOGY)
+  await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
+
+  // more checks than the pane keeps, so the window is full before the edit
+  const many: string[] = []
+  for (let i = 0; i < 501; i++) many.push(JSON.stringify(passed(`2026-11-04T10:${String(Math.floor(i / 60)).padStart(2, '0')}:${String(i % 60).padStart(2, '0')}-0500`)))
+  file.text = many.join('\n') + '\n'
+  await $.classic.Stop({ stop_hook_active: false })
+  const before = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect(await before.find({ type: 'Text', text: /^✓ Every Item has a price/ })).toBeDefined()
+  await before.unmount()
+
+  // a shell command can change any file: the pass is stale until a check looks again
+  await $.classic.PostToolUse({ tool_name: 'Bash', tool_input: { command: 'sed -i s/a/b/ src/x.ts' }, tool_response: {}, tool_use_id: 't1' })
+  const after = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect((await after.find({ type: 'Text', text: /^▲ Every Item has a price/ }))?.text).toMatch(/stale/)
+  await after.unmount()
+
+  // the next check displaces an old record instead of growing the window; it still counts as new
+  file.text += JSON.stringify(passed('2026-11-04T14:00:00-0500')) + '\n'
+  await $.classic.Stop({ stop_hook_active: false })
+  const again = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect(await again.find({ type: 'Text', text: /^✓ Every Item has a price/ })).toBeDefined()
+  await again.unmount()
+})
